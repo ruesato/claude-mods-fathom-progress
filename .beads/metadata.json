@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "claude_mods_fathom",
+  "project_id": "e6298ea9-ed1d-4ebc-af3d-dd8e46a0f52f"
+}
