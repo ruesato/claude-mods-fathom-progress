@@ -78,12 +78,12 @@ test('stepText says how many are closed out of how many', async () => {
   expect(stepText(12, 12)).toBe('12 of 12')
 })
 
-test('done, in review and in progress each have an icon, next and waiting are plain dark grey, and only done and in review are green and coral', async () => {
+test('done, in review and in progress each have an icon and a color of their own, and next and waiting are plain dark grey', async () => {
   const look = (state: TaskState, isInReview = false) => barCells([task(state, isInReview)], 8)[1]
 
   expect(look('waiting')).toMatchObject({ char: ' ', color: 'text', backgroundColor: 'subtle' })
   expect(look('next')).toMatchObject({ char: ' ', color: 'text', backgroundColor: 'subtle' })
-  expect(look('inProgress')).toMatchObject({ char: '●', color: 'inverseText', backgroundColor: 'inactive' })
+  expect(look('inProgress')).toMatchObject({ char: '●', color: 'inverseText', backgroundColor: 'warning' })
   expect(look('done')).toMatchObject({ char: '✓', color: 'inverseText', backgroundColor: 'success' })
   expect(look('done', true)).toMatchObject({ char: '◐', color: 'inverseText', backgroundColor: 'claude' })
 

@@ -3,6 +3,8 @@ import { test, expect } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import type { RunTask, Snapshot, TaskState } from '../types'
+import { DARK } from './desktop'
+import type { Palette } from './desktop'
 import { drawBand } from './draw'
 
 /**
@@ -66,9 +68,10 @@ function textOf(node: Node): string {
 // once and the snapshot it draws is swapped between mounts.
 function band($: Engine, on: On) {
   let current: Snapshot = { kind: 'idle' }
+  let palette: Palette | null = null
   let isNull = false
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    const tree = drawBand($.ui.resolve(e), e.props.bodyColumns, current)
+    const tree = drawBand($.ui.resolve(e), e.props.bodyColumns, current, { surface: e.surface, palette })
     isNull = tree === null
     return tree ?? next(e)
   })
@@ -77,8 +80,9 @@ function band($: Engine, on: On) {
   // band is the head row and the line beneath.
   return {
     wasNull: () => isNull,
-    async show(snapshot: Snapshot, surface: Surface, bodyColumns = 80) {
+    async show(snapshot: Snapshot, surface: Surface, bodyColumns = 80, withPalette: Palette | null = null) {
       current = snapshot
+      palette = withPalette
       const ui = await $.ui.mount({
         plugin: 'fathom-progress',
         surface,
@@ -217,4 +221,58 @@ test('nine tasks, the over-seven case, still draw a bar with every task in it', 
   expect(head).toContain('3 of 9')
   expect([...head].filter(c => c === '▉').length).toBeGreaterThanOrEqual(7)
   await ui.unmount()
+})
+
+test('on the desktop, with a palette for the theme, the bar is one Svg with the head pill, and the step text is not drawn beside it', async ($, on) => {
+  const { show } = band($, on)
+  const { ui, head, line } = await show(EXECUTING, 'desktop', 80, DARK)
+
+  const svg = (await ui.find({ type: 'Svg' })) as unknown as { props?: { alt?: string; width?: number; height?: number; source?: string } } | undefined
+  expect(svg).toBeDefined()
+  expect(svg?.props?.alt).toBe('2 of 5 tasks done, 1 in review, task 3 in progress')
+  // 80 cells at 7.9px, less the dot, three gaps, the label's 21 characters and the percent's box.
+  expect([svg?.props?.width, svg?.props?.height]).toEqual([412, 16])
+  expect(svg?.props?.source).toContain('>2/5</text>')
+  // The label, percent and line stay Text, so they follow the theme.
+  expect(head.startsWith('●SLU-123 Progress band')).toBe(true)
+  expect(head.endsWith(' 40%')).toBe(true)
+  expect(head).not.toContain('▉')
+  expect(line).toBe('▸ now 3/5  Wire the lifecycle hooks  · 1 in review')
+  await ui.unmount()
+})
+
+test('on the desktop with no palette for the theme, and on the terminal with one, the bar stays the cell bar', async ($, on) => {
+  const { show } = band($, on)
+
+  const unknownTheme = await show(EXECUTING, 'desktop', 80, null)
+  expect(await unknownTheme.ui.find({ type: 'Svg' })).toBeUndefined()
+  expect(unknownTheme.head).toContain('2 of 5')
+  await unknownTheme.ui.unmount()
+
+  const terminal = await show(EXECUTING, 'terminal', 80, DARK)
+  expect(terminal.head).toContain('2 of 5')
+  expect(terminal.head).toContain('▉')
+  await terminal.ui.unmount()
+})
+
+test('the desktop Svg bar draws for planned and finished runs too, and while the tasks are made it is a growing track with no pill', async ($, on) => {
+  const { show } = band($, on)
+
+  for (const snapshot of [PLANNED, DONE]) {
+    const { ui } = await show(snapshot, 'desktop', 80, DARK)
+    expect(await ui.find({ type: 'Svg' })).toBeDefined()
+    await ui.unmount()
+  }
+  const creating = await show({ kind: 'creating', ref: 'SLU-123', created: 3 }, 'desktop', 80, DARK)
+  const svg = (await creating.ui.find({ type: 'Svg' })) as unknown as { props?: { alt?: string; width?: number; source?: string } } | undefined
+  expect(svg?.props?.alt).toBe('3 tasks made so far')
+  expect(svg?.props?.width).toBe(108)
+  expect(svg?.props?.source).not.toContain('class="pill"')
+  expect(creating.head).not.toContain('▉')
+  await creating.ui.unmount()
+
+  // With no palette for the theme the desktop keeps the cell bar here too.
+  const plain = await show({ kind: 'creating', ref: 'SLU-123', created: 3 }, 'desktop', 80, null)
+  expect(await plain.ui.find({ type: 'Svg' })).toBeUndefined()
+  await plain.ui.unmount()
 })

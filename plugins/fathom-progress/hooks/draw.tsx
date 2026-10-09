@@ -2,6 +2,8 @@ import type { EngineInterface } from 'claude-code'
 
 import type { RunTask, Snapshot } from '../types'
 import { SEGMENT_EDGE, allocate } from './bar'
+import { PERCENT_CELLS, barSvg, desktopBarWidth, growingSvg } from './desktop'
+import type { Palette } from './desktop'
 import { currentOf, progressOf } from './state'
 
 // The element table `$.ui.resolve(e)` returns. This file never sees `$`: the engine
@@ -12,17 +14,16 @@ type Ui = ReturnType<EngineInterface['ui']['resolve']>
 
 // What a segment looks like per state. Colors are theme keys, so the band follows the
 // person's theme; `icon` is the first mark in the segment, so the states that matter
-// never rest on color alone. `text` is the key that reads on the fill. The design (the
-// A1-A3 frames) fills only the done and in-review part of the bar: done is `success`, a
-// done task whose review is open is `claude`, and every other segment is track. The
-// terminal keeps that, with the one in progress a step lighter and marked. A task that
-// is next or waiting is plain dark grey with no mark: grey and unmarked means not
-// started, and the line under the bar names which one is next. Nothing else is coral
-// or green, so those two read as "done" and "in review" and nothing else.
+// never rest on color alone. `text` is the key that reads on the fill. The design's
+// state legend gives each state a color: done is `success`, a done task whose review is
+// open is `claude`, the one in progress is `warning` (yellow) and marked. A task that is
+// next or waiting is plain dark grey with no mark: grey and unmarked means not started,
+// and the line under the bar names which one is next. Nothing else is coral, green or
+// yellow, so those three read as "in review", "done" and "in progress" and nothing else.
 const LOOKS = {
   waiting: { color: 'subtle', text: 'text', icon: '' },
   next: { color: 'subtle', text: 'text', icon: '' },
-  inProgress: { color: 'inactive', text: 'inverseText', icon: '●' },
+  inProgress: { color: 'warning', text: 'inverseText', icon: '●' },
   done: { color: 'success', text: 'inverseText', icon: '✓' },
   review: { color: 'claude', text: 'inverseText', icon: '◐' },
 } as const
@@ -172,6 +173,8 @@ type Head = {
   label: string
   // The bar, or null when the row is too narrow for one: the count stands in.
   bar: Span[] | null
+  // The desktop's bar, an Svg, which takes the bar's place when there is one.
+  svg?: { source: string; alt: string; width: number; height: number } | null
   count: string
   percent: string
 }
@@ -180,6 +183,8 @@ type Head = {
 // gaps between them are layout, not text, so each part can be found on its own.
 function drawHead(ui: Ui, head: Head) {
   const { Box, Text } = ui
+  // Only the desktop's element table has Svg.
+  const Svg = 'Svg' in ui ? ui.Svg : null
   return (
     <Box columnGap={1}>
       <Box flexShrink={0}>
@@ -189,7 +194,9 @@ function drawHead(ui: Ui, head: Head) {
         <Text>{head.label}</Text>
       </Box>
       <Box flexShrink={0}>
-        {head.bar ? (
+        {head.svg && Svg ? (
+          <Svg source={head.svg.source} alt={head.svg.alt} width={head.svg.width} height={head.svg.height} />
+        ) : head.bar ? (
           <Text wrap="truncate">
             {head.bar.map((s, i) => (
               <Text key={i} color={s.color} backgroundColor={s.backgroundColor} bold={s.isBold}>
@@ -201,7 +208,9 @@ function drawHead(ui: Ui, head: Head) {
           <Text dimColor>{head.count}</Text>
         )}
       </Box>
-      <Box flexShrink={0}>
+      {/* Next to an Svg the percent has a box of its own width, right-aligned: the Svg is
+          sized in pixels and the row's spare room then falls at the end, not before it. */}
+      <Box flexShrink={0} width={head.svg ? PERCENT_CELLS : undefined} justifyContent={head.svg ? 'flex-end' : undefined}>
         <Text bold>{head.percent}</Text>
       </Box>
     </Box>
@@ -238,7 +247,16 @@ function percentText(percent: number): string {
 
 // The band for a snapshot, or null when there is nothing to draw (the caller passes the
 // event on, so beads-status can draw there).
-export function drawBand(ui: Ui, bodyColumns: number, snapshot: Snapshot) {
+//
+// `target` says where it draws. On the desktop, with a palette for the person's theme, the
+// bar is the Svg of the design's frames, with its head pill; anywhere else it is the cell
+// bar with the step text inside it.
+export function drawBand(
+  ui: Ui,
+  bodyColumns: number,
+  snapshot: Snapshot,
+  target: { surface?: string; palette?: Palette | null } = {},
+) {
   const { Box, Text } = ui
 
   if (snapshot.kind === 'idle') return null
@@ -262,12 +280,16 @@ export function drawBand(ui: Ui, bodyColumns: number, snapshot: Snapshot) {
   const label = `${snapshot.ref}${LABEL_SUFFIX}`
   const room = barWidth(bodyColumns, label)
 
+  const hasSvg = target.surface === 'desktop' && !!target.palette && 'Svg' in ui
+
   if (snapshot.kind === 'creating') {
     const made = snapshot.created
+    const svg = hasSvg && target.palette ? growingSvg(made, { palette: target.palette, width: desktopBarWidth(bodyColumns, label) }) : null
     const head = drawHead(ui, {
       dot: 'claude',
       label,
-      bar: room >= MIN_BAR_CELLS ? toSpans(growingCells(made, room)) : null,
+      bar: !svg && room >= MIN_BAR_CELLS ? toSpans(growingCells(made, room)) : null,
+      svg,
       count: `${made}`,
       percent: ' '.repeat(PERCENT_COLS),
     })
@@ -289,10 +311,16 @@ export function drawBand(ui: Ui, bodyColumns: number, snapshot: Snapshot) {
   const cells = equalWidth(room, tasks.length)
   const hasBar = tasks.length > 0 && cells >= Math.max(MIN_BAR_CELLS, tasks.length)
 
+  const svg =
+    hasSvg && target.palette && tasks.length > 0
+      ? barSvg(tasks, { palette: target.palette, isFinished, width: desktopBarWidth(bodyColumns, label) })
+      : null
+
   const head = drawHead(ui, {
     dot,
     label,
-    bar: hasBar ? toSpans(barCells(tasks, cells)) : null,
+    bar: !svg && hasBar ? toSpans(barCells(tasks, cells)) : null,
+    svg,
     count: stepText(done, total),
     percent: percentText(percent),
   })

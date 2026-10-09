@@ -3,6 +3,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { Plan, Snapshot } from '../types'
 import { readBd } from './bd'
+import { paletteFor } from './desktop'
 import { drawBand } from './draw'
 import { POLL_MS, planPath, startOf, touchesRun } from './lifecycle'
 import { parsePlan } from './plan'
@@ -50,6 +51,19 @@ async function build($: EngineInterface, since: number): Promise<Snapshot> {
   }
 }
 
+// The person's theme, as `/config` holds it, for the desktop bar's colors. Read with each
+// refresh and not with each draw, since it rarely changes and a draw must stay quick.
+let theme: string | null = null
+
+async function readTheme($: EngineInterface) {
+  try {
+    const row = (await $.config.list()).find(r => r.key === 'theme')
+    theme = typeof row?.value === 'string' ? row.value : null
+  } catch {
+    theme = null
+  }
+}
+
 // One refresh at a time. A call that arrives during one asks for another straight
 // after it, so the last change is never missed and the calls never pile up.
 let isRefreshing = false
@@ -67,6 +81,7 @@ async function refresh($: EngineInterface) {
       const since = await read($, armedAt)
       // Not armed: nothing to show and nothing to poll.
       if (since === null) return
+      await readTheme($)
       const fresh = await build($, since)
       // A new invocation, or the session ending, during the fetch makes it stale.
       if ((await read($, armedAt)) === since) await update($, snapshot, () => fresh)
@@ -138,6 +153,6 @@ export const register: Register = on => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const current = await read($, snapshot)
     if (e.props.hasSurvey || current.kind === 'idle' || (await read($, isHidden))) return next(e)
-    return drawBand($.ui.resolve(e), e.props.bodyColumns, current) ?? next(e)
+    return drawBand($.ui.resolve(e), e.props.bodyColumns, current, { surface: e.surface, palette: paletteFor(theme) }) ?? next(e)
   })
 }
