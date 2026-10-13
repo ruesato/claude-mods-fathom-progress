@@ -69,29 +69,54 @@ function newest(epics: readonly Epic[], key: 'createdAt' | 'updatedAt'): Epic | 
   return best
 }
 
+// What names the issue of the invocation, when something does: its upper-cased refs, and
+// whether a person typed them (`isExact`) or only the branch is named for them.
+export type RunHint = { refs: readonly string[]; isExact: boolean }
+
 // The run the band shows: the newest epic created since the latest Fathom
 // invocation, otherwise the open epic with the most recent activity (a resumed
 // issue, whose epic is older than this invocation). A closed epic is only picked
 // by the first rule, so a finished run stays up until the next one starts.
 // `armedAt` is that invocation's time in ms.
 //
-// A resumed run whose old epic is still open is shown from the moment of the
-// invocation, since nothing says which issue the invocation named. The skill's text
-// may carry it; the probe (claude-mods-fathom-5l2.2) says.
-export function pickRun(epics: readonly Epic[], armedAt: number): Epic | null {
+// Without a hint, a resumed run whose old epic is still open is shown from the moment of
+// the invocation, since nothing says which issue the invocation named.
+//
+// A `hint` settles what that guess cannot. The named run is shown open or closed, so a
+// finished run is shown as finished, not left waiting for an epic that will not come.
+// - A typed ref is the issue: only its epic is shown, and until it has one the band
+//   waits, never showing some other open run.
+// - A branch's ref is a better guess than the latest activity, and no more: an epic made
+//   since the invocation still wins (the person may be starting another issue than the
+//   one the branch is for), and with no epic for the ref the old guess stands.
+export function pickRun(epics: readonly Epic[], armedAt: number, hint?: RunHint): Epic | null {
   // Epics are stamped to the second, so one made in the invocation's own second
   // counts as made after it.
   const since = Math.floor(armedAt / 1000) * 1000
-  return (
+  const made = newest(
+    epics.filter(e => e.createdAt >= since),
+    'createdAt',
+  )
+  const latest = newest(
+    epics.filter(e => e.status !== 'closed'),
+    'updatedAt',
+  )
+
+  const refs = hint?.refs ?? []
+  if (refs.length === 0) return made ?? latest
+
+  const named = epics.filter(e => refs.includes(e.ref.toUpperCase()))
+  const pick =
     newest(
-      epics.filter(e => e.createdAt >= since),
+      named.filter(e => e.createdAt >= since),
       'createdAt',
     ) ??
     newest(
-      epics.filter(e => e.status !== 'closed'),
+      named.filter(e => e.status !== 'closed'),
       'updatedAt',
-    )
-  )
+    ) ??
+    newest(named, 'updatedAt')
+  return hint?.isExact ? pick : (made ?? pick ?? latest)
 }
 
 function parseTasks(value: unknown): Task[] | null {

@@ -64,6 +64,15 @@ function textOf(node: Node): string {
   return typeof node === 'string' ? node : (node.children ?? []).map(textOf).join('')
 }
 
+// The Boxes under a node that have a background, in drawing order: a segment of the
+// desktop's theme-following bar is one.
+function filledBoxes(node: unknown): { color: unknown; width: unknown }[] {
+  const n = node as { type?: string; props?: Record<string, unknown>; children?: unknown[] } | string | null | undefined
+  if (!n || typeof n === 'string') return []
+  const own = n.type === 'Box' && n.props?.backgroundColor ? [{ color: n.props.backgroundColor, width: n.props.width }] : []
+  return [...own, ...(n.children ?? []).flatMap(filledBoxes)]
+}
+
 // The kit takes one `on` per test, before the first mount, so the stub is registered
 // once and the snapshot it draws is swapped between mounts.
 function band($: Engine, on: On) {
@@ -95,7 +104,7 @@ function band($: Engine, on: On) {
         const node = tree?.children?.[i]
         return node === undefined ? '' : textOf(node)
       }
-      return { ui, head: row(0), line: row(1) }
+      return { ui, head: row(0), line: row(1), tree }
     },
   }
 }
@@ -216,11 +225,19 @@ test('nine tasks, the over-seven case, still draw a bar with every task in it', 
     ref: 'SLU-123',
     tasks: runOf(['done', 'done', 'done', 'inProgress', 'waiting', 'waiting', 'waiting', 'waiting', 'waiting']),
   }
-  const { ui, head } = await show(nine, 'desktop')
+  const terminal = await show(nine, 'terminal')
+  expect(terminal.head).toContain('3 of 9')
+  expect([...terminal.head].filter(c => c === '▉').length).toBeGreaterThanOrEqual(7)
+  await terminal.ui.unmount()
 
-  expect(head).toContain('3 of 9')
-  expect([...head].filter(c => c === '▉').length).toBeGreaterThanOrEqual(7)
-  await ui.unmount()
+  // On the desktop the nine segments are too narrow for `3 of 9`; each task still has its
+  // own segment and its icon, and the line beneath and the percent carry the count.
+  const desktop = await show(nine, 'desktop')
+  expect(filledBoxes(desktop.tree)).toHaveLength(9)
+  expect([...desktop.head].filter(c => c === '✓')).toHaveLength(3)
+  expect(desktop.head).not.toContain('▉')
+  expect(desktop.line).toContain('now 4/9')
+  await desktop.ui.unmount()
 })
 
 test('on the desktop, with a palette for the theme, the bar is one Svg with the head pill, and the step text is not drawn beside it', async ($, on) => {
@@ -241,17 +258,23 @@ test('on the desktop, with a palette for the theme, the bar is one Svg with the 
   await ui.unmount()
 })
 
-test('on the desktop with no palette for the theme, and on the terminal with one, the bar stays the cell bar', async ($, on) => {
+test('on the desktop with no palette for the theme the bar is boxes in the theme\'s colors, never block characters; the terminal keeps its cell bar', async ($, on) => {
   const { show } = band($, on)
 
   const unknownTheme = await show(EXECUTING, 'desktop', 80, null)
   expect(await unknownTheme.ui.find({ type: 'Svg' })).toBeUndefined()
+  // One box per task: done, done with a review open, in progress, and two waiting.
+  const boxes = filledBoxes(unknownTheme.tree)
+  expect(boxes.map(b => b.color)).toEqual(['success', 'claude', 'warning', 'subtle', 'subtle'])
+  expect(new Set(boxes.map(b => b.width)).size).toBe(1)
   expect(unknownTheme.head).toContain('2 of 5')
+  expect(unknownTheme.head).not.toContain('▉')
   await unknownTheme.ui.unmount()
 
   const terminal = await show(EXECUTING, 'terminal', 80, DARK)
   expect(terminal.head).toContain('2 of 5')
   expect(terminal.head).toContain('▉')
+  expect(filledBoxes(terminal.tree)).toHaveLength(0)
   await terminal.ui.unmount()
 })
 
@@ -271,8 +294,10 @@ test('the desktop Svg bar draws for planned and finished runs too, and while the
   expect(creating.head).not.toContain('▉')
   await creating.ui.unmount()
 
-  // With no palette for the theme the desktop keeps the cell bar here too.
+  // With no palette for the theme it is three blank boxes in the theme's grey, not blocks.
   const plain = await show({ kind: 'creating', ref: 'SLU-123', created: 3 }, 'desktop', 80, null)
   expect(await plain.ui.find({ type: 'Svg' })).toBeUndefined()
+  expect(filledBoxes(plain.tree).map(b => [b.color, b.width])).toEqual([['subtle', 4], ['subtle', 4], ['subtle', 4]])
+  expect(plain.head).not.toContain('▉')
   await plain.ui.unmount()
 })

@@ -1,6 +1,6 @@
 import { test, expect } from 'claude-code/testing'
 
-import { planPath, startOf, touchesRun } from './lifecycle'
+import { planPath, refsIn, refsOfBranch, refsOfPrompt, startOf, startOfPrompt, touchesRun } from './lifecycle'
 
 test('startOf names which Fathom skill started, with or without the plugin prefix', async () => {
   expect(startOf('fathom:execute')).toBe('execute')
@@ -13,6 +13,49 @@ test('the other Fathom skills, other plugins\' skills and near misses start noth
   for (const name of ['fathom:review', 'fathom:ship', 'fathom:fathom-shared', 'ship:execute', 'fathom:execute-all', 'xfathom:execute', 'commit', '']) {
     expect(startOf(name)).toBeNull()
   }
+})
+
+test('startOfPrompt reads a typed Fathom slash command, with or without arguments', async () => {
+  expect(startOfPrompt('/fathom:execute')).toBe('execute')
+  expect(startOfPrompt('/fathom:execute pha-352')).toBe('execute')
+  expect(startOfPrompt('  /fathom:scaffold\nsome notes')).toBe('scaffold')
+})
+
+test('startOfPrompt ignores other prompts, other Fathom skills and near misses', async () => {
+  for (const text of ['/execute', '/fathom:review', '/fathom:execute-all', '/fathom:executex', 'fathom:execute', 'run /fathom:execute', 'please /fathom:scaffold', '/ship:execute', '']) {
+    expect(startOfPrompt(text)).toBeNull()
+  }
+})
+
+test('refsIn finds issue refs, upper-cased and in order, once each', async () => {
+  expect(refsIn('pha-352')).toEqual(['PHA-352'])
+  expect(refsIn('ONC-5 onc-6, then ONC-5 again')).toEqual(['ONC-5', 'ONC-6'])
+  expect(refsIn('https://linear.app/slickage/issue/PHA-352/relabel-the-3-way-results-control')).toEqual(['PHA-352'])
+  expect(refsIn('feat/pha-352-relabel-results-view-control')).toEqual(['PHA-352'])
+})
+
+test('refsIn ignores what only looks like a ref', async () => {
+  for (const text of ['', 'main', 'wip-phase-3', 'relabel-the-3-way', 'x-1', 'abcdefghijkl-1', 'PHA-', '3-way', 'PHA-352x']) {
+    expect(refsIn(text)).toEqual([])
+  }
+})
+
+test('refsOfPrompt reads the refs typed after a Fathom command, and only there', async () => {
+  expect(refsOfPrompt('/fathom:execute pha-352')).toEqual(['PHA-352'])
+  expect(refsOfPrompt('/fathom:execute ONC-5 ONC-6')).toEqual(['ONC-5', 'ONC-6'])
+  expect(refsOfPrompt('/fathom:execute')).toEqual([])
+  expect(refsOfPrompt('/fathom:scaffold https://linear.app/x/issue/SLU-9/some-title')).toEqual(['SLU-9'])
+  expect(refsOfPrompt('fathom execute pha-352')).toEqual([])
+  expect(refsOfPrompt('/fathom:review pha-352')).toEqual([])
+})
+
+test('refsOfBranch takes the first ref a branch is named for, and none from a branch without one', async () => {
+  expect(refsOfBranch('feat/pha-352-relabel-results-view-control')).toEqual(['PHA-352'])
+  expect(refsOfBranch('pha-352')).toEqual(['PHA-352'])
+  expect(refsOfBranch('fix/pha-1-and-pha-2')).toEqual(['PHA-1'])
+  expect(refsOfBranch('main')).toEqual([])
+  expect(refsOfBranch('wip-phase-3')).toEqual([])
+  expect(refsOfBranch('')).toEqual([])
 })
 
 test('planPath puts a plain ref under .fathom/plans, whether or not the root ends in a slash', async () => {

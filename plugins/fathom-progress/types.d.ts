@@ -66,6 +66,9 @@ declare module 'claude-code' {
       // the first one and again after the session ends. While it is null the band
       // yields and nothing polls.
       armedAt: number | null
+      // The issue refs the person typed after the Fathom command that armed the band,
+      // upper-cased; empty when none, and again after the session ends.
+      refs: string[]
       // What the band draws, rebuilt from bd while armed.
       snapshot: Snapshot
       // The person's toggle, like beads-status has.

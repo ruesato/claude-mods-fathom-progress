@@ -5,11 +5,12 @@ import type { Plan, Snapshot } from '../types'
 import { readBd } from './bd'
 import { paletteFor } from './desktop'
 import { drawBand } from './draw'
-import { POLL_MS, planPath, startOf, touchesRun } from './lifecycle'
+import { POLL_MS, planPath, refsOfBranch, refsOfPrompt, startOf, startOfPrompt, touchesRun } from './lifecycle'
 import { parsePlan } from './plan'
 import { parseEpics, pickRun, toSnapshot } from './state'
 
 const armedAt = atom({ plugin: 'fathom-progress', key: 'armedAt' } as const, null)
+const armedRefs = atom({ plugin: 'fathom-progress', key: 'refs' } as const, [])
 const snapshot = atom({ plugin: 'fathom-progress', key: 'snapshot' } as const, { kind: 'idle' })
 const isHidden = atom({ plugin: 'fathom-progress', key: 'isHidden' } as const, false)
 
@@ -28,15 +29,36 @@ async function readPlan($: EngineInterface, root: string, ref: string): Promise<
   }
 }
 
+// The branch the session's repository is on, or '' when there is none to read. Read with
+// each refresh and not when armed: Fathom makes the issue's branch after it starts.
+async function branchOf($: EngineInterface, root: string): Promise<string> {
+  try {
+    const out = await $.process.run(['git', 'branch', '--show-current'], { cwd: root })
+    return out.exitCode === 0 ? out.stdout.trim() : ''
+  } catch {
+    return ''
+  }
+}
+
+// What the debug log last said the band follows, so it says it once per change.
+let lastFollowed = ''
+
 // Reads bd and the plan document and builds what the band shows. Three bd calls, one
-// after the other: they are reads, but they share one embedded database.
-async function build($: EngineInterface, since: number): Promise<Snapshot> {
+// after the other: they are reads, but they share one embedded database. `typed` is
+// what the person typed after the command; with none, the branch's ref stands in.
+async function build($: EngineInterface, since: number, typed: readonly string[]): Promise<Snapshot> {
   try {
     const root = await $.session.root()
     const epics = parseEpics(await bd($, root, ['list', '--type', 'epic', '--all', '--limit', '0', '--json']))
     if (epics === null) return { kind: 'unavailable', reason: 'bd did not return a JSON list' }
 
-    const epic = pickRun(epics, since)
+    const branch = typed.length > 0 ? [] : refsOfBranch(await branchOf($, root))
+    const epic = pickRun(epics, since, { refs: typed.length > 0 ? typed : branch, isExact: typed.length > 0 })
+    const followed = `${epic?.ref ?? 'nothing'} (typed ${typed.join(',') || '-'}, branch ${branch.join(',') || '-'})`
+    if (followed !== lastFollowed) {
+      lastFollowed = followed
+      $.ui.log(`fathom-progress: following ${followed}`, { to: 'debug' })
+    }
     if (epic === null) return { kind: 'starting' }
 
     const ref = epic.ref
@@ -82,7 +104,7 @@ async function refresh($: EngineInterface) {
       // Not armed: nothing to show and nothing to poll.
       if (since === null) return
       await readTheme($)
-      const fresh = await build($, since)
+      const fresh = await build($, since, await read($, armedRefs))
       // A new invocation, or the session ending, during the fetch makes it stale.
       if ((await read($, armedAt)) === since) await update($, snapshot, () => fresh)
     } while (isStale)
@@ -91,15 +113,30 @@ async function refresh($: EngineInterface) {
   }
 }
 
+// One start reaches arm by more than one signal within about this long.
+const SAME_START_MS = 3000
+
 // A Fathom skill started. Execute arms the band: it shows `starting` until the epic
 // exists, then follows the run. Scaffold writes no beads, so there is no run to follow:
 // it shows `starting` and disarms, which also stops the poll.
-async function arm($: EngineInterface, skill: string) {
-  const start = startOf(skill)
+async function arm($: EngineInterface, start: 'execute' | 'scaffold' | null, via: string, refs: readonly string[] = []) {
   if (start === null) return
   const now = await $.clock.now()
+  // One start can reach here by more than one signal (a typed command is a `skill.prompt`
+  // and a `prompt.submit`): the later ones, moments after the first, add nothing, except
+  // the refs, which only the typed command carries and which may come second.
+  const last = await read($, armedAt)
+  if (start === 'execute' && last !== null && now - last < SAME_START_MS) {
+    if (refs.length > 0) {
+      await update($, armedRefs, () => [...refs])
+      void refresh($)
+    }
+    return
+  }
   await update($, armedAt, () => (start === 'execute' ? now : null))
+  await update($, armedRefs, () => [...refs])
   await update($, snapshot, () => ({ kind: 'starting' }))
+  $.ui.log(`fathom-progress: armed (${start}) by ${via}, typed refs ${refs.join(',') || '-'}`, { to: 'debug' })
   if (start === 'execute') void refresh($)
 }
 
@@ -113,7 +150,7 @@ export const register: Register = on => {
 
     // A taken name throws, and a hook that throws is skipped; register last.
     try {
-      await $.command.register({ name: 'fathom-band', description: 'Toggle the Fathom progress band.' })
+      await $.command.register({ name: 'fathom-progress', description: 'Toggle the Fathom progress band.' })
     } catch {}
 
     return next(e)
@@ -123,6 +160,7 @@ export const register: Register = on => {
   // session.start does not fire again, so the reset is here, for every reason.
   on('session.end', async ($, e, next) => {
     await update($, armedAt, () => null)
+    await update($, armedRefs, () => [])
     await update($, snapshot, () => ({ kind: 'idle' }))
     return next(e)
   })
@@ -130,7 +168,24 @@ export const register: Register = on => {
   // The signal that Fathom started: the engine reports the skill's own text, typed as a
   // command or called through the Skill tool. A new invocation re-arms and re-picks.
   on('skill.prompt', async ($, e, next) => {
-    await arm($, e.skill)
+    await arm($, startOf(e.skill), 'skill.prompt')
+    return next(e)
+  })
+
+  // The same two signals where `skill.prompt` is skipped (a Team organization's built-in
+  // security plugin answers it first): a typed command, and the Skill tool's call. Both
+  // only read; a failure here must never hold up the prompt or the tool.
+  on('prompt.submit', async ($, e, next) => {
+    try {
+      await arm($, startOfPrompt(e.text), 'prompt.submit', refsOfPrompt(e.text))
+    } catch {}
+    return next(e)
+  })
+
+  on('tool.call', { tool: 'Skill' }, async ($, e, next) => {
+    try {
+      if (typeof e.skill === 'string') await arm($, startOf(e.skill), 'tool.call')
+    } catch {}
     return next(e)
   })
 
@@ -142,7 +197,7 @@ export const register: Register = on => {
     return result
   })
 
-  on('command.run', { command: 'fathom-band' }, async $ => {
+  on('command.run', { command: 'fathom-progress' }, async $ => {
     const current = await read($, isHidden)
     await update($, isHidden, () => !current)
     return { text: current ? 'Fathom band shown.' : 'Fathom band hidden.' }

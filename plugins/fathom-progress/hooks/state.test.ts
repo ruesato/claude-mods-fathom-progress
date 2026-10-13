@@ -172,6 +172,53 @@ test('an epic made in the invocation\'s own second counts as made after it, and 
   expect(pickRun([], 0)).toBeNull()
 })
 
+// Three runs: a finished one, an open one with later activity, and one made after the
+// invocation below.
+const T = (s: string) => Date.parse(`2026-01-01T00:00:${s}Z`)
+const RUNS = [
+  { id: 'old', ref: 'PHA-352', status: 'closed', createdAt: T('01'), updatedAt: T('09') },
+  { id: 'open', ref: 'PHA-400', status: 'open', createdAt: T('02'), updatedAt: T('20') },
+]
+const ARMED = T('30')
+
+test('a typed ref shows its own run, finished or not, and waits when it has none', async () => {
+  expect(pickRun(RUNS, ARMED)?.id).toBe('open')
+  expect(pickRun(RUNS, ARMED, { refs: ['PHA-352'], isExact: true })?.id).toBe('old')
+  expect(pickRun(RUNS, ARMED, { refs: ['PHA-400'], isExact: true })?.id).toBe('open')
+  // No epic for the ref yet: nothing, not the other open run.
+  expect(pickRun(RUNS, ARMED, { refs: ['PHA-999'], isExact: true })).toBeNull()
+})
+
+test('a ref is matched whatever its case', async () => {
+  const lower = [{ ...RUNS[0]!, ref: 'pha-352' }]
+  expect(pickRun(lower, ARMED, { refs: ['PHA-352'], isExact: true })?.id).toBe('old')
+})
+
+test('a typed ref picks the newest of its epics made since the invocation, then an open one', async () => {
+  const again = { id: 'again', ref: 'PHA-352', status: 'open', createdAt: ARMED + 5000, updatedAt: ARMED + 5000 }
+  const reopened = { id: 'reopened', ref: 'PHA-352', status: 'open', createdAt: T('03'), updatedAt: T('15') }
+  const hint = { refs: ['PHA-352'], isExact: true }
+  expect(pickRun([...RUNS, again], ARMED, hint)?.id).toBe('again')
+  expect(pickRun([...RUNS, reopened], ARMED, hint)?.id).toBe('reopened')
+})
+
+test('several typed refs pick among their epics only', async () => {
+  expect(pickRun(RUNS, ARMED, { refs: ['PHA-352', 'PHA-400'], isExact: true })?.id).toBe('open')
+  expect(pickRun(RUNS, ARMED, { refs: ['PHA-777', 'PHA-352'], isExact: true })?.id).toBe('old')
+})
+
+test('a branch ref beats the latest activity, but not an epic made since the invocation, and falls back without a match', async () => {
+  const branch = (ref: string) => ({ refs: [ref], isExact: false })
+  // The branch is for PHA-352, which is finished: shown as finished, not the open PHA-400.
+  expect(pickRun(RUNS, ARMED, branch('PHA-352'))?.id).toBe('old')
+  // Another issue was started since: it wins over the branch's.
+  const started = { id: 'started', ref: 'PHA-401', status: 'open', createdAt: ARMED + 2000, updatedAt: ARMED + 2000 }
+  expect(pickRun([...RUNS, started], ARMED, branch('PHA-352'))?.id).toBe('started')
+  // A branch with no epic keeps the old guess.
+  expect(pickRun(RUNS, ARMED, branch('PHA-999'))?.id).toBe('open')
+  expect(pickRun(RUNS, ARMED, { refs: [], isExact: false })?.id).toBe('open')
+})
+
 test('toSnapshot refuses output that is not a list instead of reporting an empty run', async () => {
   const epic = { id: 'a', ref: 'SLU-1', status: 'open', createdAt: 0, updatedAt: 0 }
 

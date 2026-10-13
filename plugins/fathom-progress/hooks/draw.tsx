@@ -2,7 +2,7 @@ import type { EngineInterface } from 'claude-code'
 
 import type { RunTask, Snapshot } from '../types'
 import { SEGMENT_EDGE, allocate } from './bar'
-import { PERCENT_CELLS, barSvg, desktopBarWidth, growingSvg } from './desktop'
+import { CELL_PX, PERCENT_CELLS, barSvg, desktopBarWidth, growingSvg } from './desktop'
 import type { Palette } from './desktop'
 import { currentOf, progressOf } from './state'
 
@@ -168,6 +168,70 @@ export function toSpans(cells: readonly Cell[]): Span[] {
   return spans
 }
 
+// The desktop's bar for a theme that has no Svg palette: one Box per task, its background
+// a theme key and its width in cells, so it follows the theme and needs no block
+// characters, which do not line up in the desktop's proportional font. A cell is CELL_PX
+// there. There is no rounded corner or pill; the icons and the step text are the same.
+const DESKTOP_GAP = 1
+// While the tasks are made each takes this many cells of the bar.
+const GROW_CELLS = 4
+// A segment needs a cell of padding each side and room for an icon to carry one; the step
+// text `N of M` takes about 5 cells, and with the icon beside it the last segment needs 9.
+const MIN_SEGMENT_CELLS = 3
+const STEP_CELLS = 6
+const STEP_ICON_CELLS = 9
+
+export type DesktopSegment = { width: number; color: string; textColor: string; icon: string; step: string }
+
+// Equal segments with a gap between, across `room` cells; none when they would be too
+// narrow to mark. The step text sits in the last, with its icon dropped when the two do
+// not fit together, as in the terminal.
+export function desktopSegments(tasks: readonly RunTask[], room: number): DesktopSegment[] {
+  const count = tasks.length
+  if (count === 0) return []
+  const width = Math.floor((room - (count - 1) * DESKTOP_GAP) / count)
+  if (width < MIN_SEGMENT_CELLS) return []
+  const { done, total } = progressOf(tasks)
+  return tasks.map((task, i) => {
+    const look = lookOf(task)
+    const hasStep = i === count - 1 && width >= STEP_CELLS
+    const hasIcon = look.icon !== '' && (!hasStep || width >= STEP_ICON_CELLS)
+    return { width, color: look.color, textColor: look.text, icon: hasIcon ? look.icon : '', step: hasStep ? stepText(done, total) : '' }
+  })
+}
+
+// One blank piece for each task made so far, as many as the room holds, and at least one.
+export function growingSegments(made: number, room: number): DesktopSegment[] {
+  const fit = Math.max(1, Math.floor((room + DESKTOP_GAP) / (GROW_CELLS + DESKTOP_GAP)))
+  const { color, text } = LOOKS.waiting
+  return Array.from({ length: Math.min(Math.max(1, made), fit) }, () => ({ width: GROW_CELLS, color, textColor: text, icon: '', step: '' }))
+}
+
+function drawSegments(ui: Ui, segments: readonly DesktopSegment[]) {
+  const { Box, Text } = ui
+  return (
+    <Box columnGap={DESKTOP_GAP}>
+      {segments.map((seg, i) => (
+        <Box
+          key={`segment-${i}`}
+          width={seg.width}
+          height={1}
+          backgroundColor={seg.color}
+          paddingX={1}
+          justifyContent={seg.icon && seg.step ? 'space-between' : seg.step ? 'flex-end' : 'flex-start'}
+        >
+          {seg.icon ? <Text color={seg.textColor}>{seg.icon}</Text> : null}
+          {seg.step ? (
+            <Text color={seg.textColor} bold>
+              {seg.step}
+            </Text>
+          ) : null}
+        </Box>
+      ))}
+    </Box>
+  )
+}
+
 type Head = {
   dot: string
   label: string
@@ -175,6 +239,8 @@ type Head = {
   bar: Span[] | null
   // The desktop's bar, an Svg, which takes the bar's place when there is one.
   svg?: { source: string; alt: string; width: number; height: number } | null
+  // The desktop's bar for a theme with no Svg palette, which takes it when there is one.
+  segments?: DesktopSegment[] | null
   count: string
   percent: string
 }
@@ -185,6 +251,7 @@ function drawHead(ui: Ui, head: Head) {
   const { Box, Text } = ui
   // Only the desktop's element table has Svg.
   const Svg = 'Svg' in ui ? ui.Svg : null
+  const hasSegments = !!head.segments && head.segments.length > 0
   return (
     <Box columnGap={1}>
       <Box flexShrink={0}>
@@ -196,6 +263,8 @@ function drawHead(ui: Ui, head: Head) {
       <Box flexShrink={0}>
         {head.svg && Svg ? (
           <Svg source={head.svg.source} alt={head.svg.alt} width={head.svg.width} height={head.svg.height} />
+        ) : hasSegments && head.segments ? (
+          drawSegments(ui, head.segments)
         ) : head.bar ? (
           <Text wrap="truncate">
             {head.bar.map((s, i) => (
@@ -208,9 +277,9 @@ function drawHead(ui: Ui, head: Head) {
           <Text dimColor>{head.count}</Text>
         )}
       </Box>
-      {/* Next to an Svg the percent has a box of its own width, right-aligned: the Svg is
-          sized in pixels and the row's spare room then falls at the end, not before it. */}
-      <Box flexShrink={0} width={head.svg ? PERCENT_CELLS : undefined} justifyContent={head.svg ? 'flex-end' : undefined}>
+      {/* Next to a bar sized in pixels or cells the percent has a box of its own width,
+          right-aligned, so the row's spare room falls at the end, not before it. */}
+      <Box flexShrink={0} width={head.svg || hasSegments ? PERCENT_CELLS : undefined} justifyContent={head.svg || hasSegments ? 'flex-end' : undefined}>
         <Text bold>{head.percent}</Text>
       </Box>
     </Box>
@@ -280,16 +349,21 @@ export function drawBand(
   const label = `${snapshot.ref}${LABEL_SUFFIX}`
   const room = barWidth(bodyColumns, label)
 
-  const hasSvg = target.surface === 'desktop' && !!target.palette && 'Svg' in ui
+  const isDesktop = target.surface === 'desktop'
+  const hasSvg = isDesktop && !!target.palette && 'Svg' in ui
+  // The cells the desktop's bar has, from the pixels the row leaves.
+  const desktopCells = isDesktop ? Math.floor(desktopBarWidth(bodyColumns, label) / CELL_PX) : 0
 
   if (snapshot.kind === 'creating') {
     const made = snapshot.created
     const svg = hasSvg && target.palette ? growingSvg(made, { palette: target.palette, width: desktopBarWidth(bodyColumns, label) }) : null
+    const segments = isDesktop && !svg ? growingSegments(made, desktopCells) : null
     const head = drawHead(ui, {
       dot: 'claude',
       label,
-      bar: !svg && room >= MIN_BAR_CELLS ? toSpans(growingCells(made, room)) : null,
+      bar: !isDesktop && room >= MIN_BAR_CELLS ? toSpans(growingCells(made, room)) : null,
       svg,
+      segments,
       count: `${made}`,
       percent: ' '.repeat(PERCENT_COLS),
     })
@@ -316,11 +390,14 @@ export function drawBand(
       ? barSvg(tasks, { palette: target.palette, isFinished, width: desktopBarWidth(bodyColumns, label) })
       : null
 
+  const segments = isDesktop && !svg && tasks.length > 0 ? desktopSegments(tasks, desktopCells) : null
   const head = drawHead(ui, {
     dot,
     label,
-    bar: !svg && hasBar ? toSpans(barCells(tasks, cells)) : null,
+    // The desktop never draws the cell bar, whose blocks do not line up in its font.
+    bar: !isDesktop && hasBar ? toSpans(barCells(tasks, cells)) : null,
     svg,
+    segments,
     count: stepText(done, total),
     percent: percentText(percent),
   })

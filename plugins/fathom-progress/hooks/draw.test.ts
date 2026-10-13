@@ -2,7 +2,7 @@ import { test, expect } from 'claude-code/testing'
 
 import type { RunTask, TaskState } from '../types'
 import { allocate } from './bar'
-import { barCells, barWidth, equalWidth, growingCells, lineText, lookOf, stepText, toSpans } from './draw'
+import { barCells, barWidth, desktopSegments, equalWidth, growingCells, growingSegments, lineText, lookOf, stepText, toSpans } from './draw'
 import type { Cell } from './draw'
 
 const task = (state: TaskState, isInReview = false): RunTask => ({
@@ -177,4 +177,41 @@ test('equalWidth trims the bar to a multiple of the task count, so every segment
     const widths = allocate(Array.from({ length: count }, () => 1), equalWidth(48, count))
     expect(new Set(widths).size).toBe(1)
   }
+})
+
+test('desktop segments: equal widths with a one-cell gap across the room, in the colors and icons of each state', async () => {
+  const tasks = [task('done'), task('done', true), task('inProgress'), task('waiting'), task('waiting')]
+  const segments = desktopSegments(tasks, 52)
+
+  // 52 cells less four gaps leaves 48, which five tasks share as 9 each.
+  expect(segments.map(s => s.width)).toEqual([9, 9, 9, 9, 9])
+  expect(segments.map(s => s.color)).toEqual(['success', 'claude', 'warning', 'subtle', 'subtle'])
+  expect(segments.map(s => s.icon)).toEqual(['✓', '◐', '●', '', ''])
+  // The step text is in the last, which is waiting: plain text on the grey, and no icon to drop.
+  expect(segments.map(s => s.step)).toEqual(['', '', '', '', '2 of 5'])
+  expect(segments[4]).toMatchObject({ color: 'subtle', textColor: 'text' })
+  expect(segments[0]).toMatchObject({ textColor: 'inverseText' })
+})
+
+test('desktop segments: the last keeps its icon only while the icon and the step text fit together, then the step text alone, then neither', async () => {
+  const done = (count: number) => Array.from({ length: count }, () => task('done'))
+  const last = (room: number) => desktopSegments(done(5), room).at(-1)
+
+  // Five tasks: widths of 9, 8, 6, 5 cells come from rooms of 49, 44, 34, 29.
+  expect(last(49)).toMatchObject({ width: 9, icon: '✓', step: '5 of 5' })
+  expect(last(44)).toMatchObject({ width: 8, icon: '', step: '5 of 5' })
+  expect(last(34)).toMatchObject({ width: 6, icon: '', step: '5 of 5' })
+  expect(last(29)).toMatchObject({ width: 5, icon: '✓', step: '' })
+  // Three cells is the least that marks a task; below that there are no segments, and the row shows the count instead.
+  expect(desktopSegments(done(5), 19).map(s => s.width)).toEqual([3, 3, 3, 3, 3])
+  expect(desktopSegments(done(5), 18)).toEqual([])
+  expect(desktopSegments([], 52)).toEqual([])
+})
+
+test('desktop growing pieces: one for each task made, four cells each, as many as the room holds, and at least one', async () => {
+  expect(growingSegments(0, 52).map(s => s.width)).toEqual([4])
+  expect(growingSegments(3, 52).map(s => [s.width, s.color])).toEqual([[4, 'subtle'], [4, 'subtle'], [4, 'subtle']])
+  // 52 cells hold ten pieces of 4 with a gap of 1 between.
+  expect(growingSegments(99, 52)).toHaveLength(10)
+  expect(growingSegments(2, 3)).toHaveLength(1)
 })

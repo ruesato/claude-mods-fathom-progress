@@ -16,6 +16,45 @@ export function startOf(skill: string): 'execute' | 'scaffold' | null {
   return name === 'execute' || name === 'scaffold' ? name : null
 }
 
+// The same, for a prompt as typed. A Team organization's built-in security plugin answers
+// `skill.prompt` itself and skips every user mod, so the band cannot rely on it
+// (claude-mods-fathom-5l2.5): `prompt.submit` and the Skill tool's `tool.call` are not
+// skipped, and between them they carry both ways a skill starts. Only a slash command
+// with the plugin prefix counts: a bare `/execute` may be another plugin's, and a false
+// start would leave the band on `starting` until the session ends.
+export function startOfPrompt(text: string): 'execute' | 'scaffold' | null {
+  const [, name] = /^\s*\/(fathom:(?:execute|scaffold))(?=\s|$)/.exec(text) ?? []
+  return name === undefined ? null : startOf(name)
+}
+
+// The issue refs in some text, in order and upper-cased, the way a tracker keys them
+// (`PHA-352`, `ONC-5`). A token with a hyphen or a letter in front of it (`the-3` in a
+// URL's slug) or a letter after it is not one; a hyphen after it is, since a branch name
+// goes on with a slug (`feat/pha-352-relabel`).
+const REF = /(^|[^A-Za-z0-9-])([A-Za-z][A-Za-z0-9]{1,9}-\d+)(?![A-Za-z0-9])/g
+
+export function refsIn(text: string): string[] {
+  const refs: string[] = []
+  for (const match of text.matchAll(REF)) {
+    const ref = (match[2] ?? '').toUpperCase()
+    if (ref && !refs.includes(ref)) refs.push(ref)
+  }
+  return refs
+}
+
+// The refs a person typed after a Fathom command (`/fathom:execute pha-352`, or the URL
+// of the issue); none for any other prompt, or a command with no arguments.
+export function refsOfPrompt(text: string): string[] {
+  return startOfPrompt(text) === null ? [] : refsIn(text.replace(/^\s*\/fathom:\w+/, ''))
+}
+
+// The ref a branch is named for, which is how Fathom itself finds the issue it resumes
+// (`feat/pha-352-relabel-results-view-control`): only the first, and none for a branch
+// with no ref in it (`main`, `wip-phase-3`).
+export function refsOfBranch(branch: string): string[] {
+  return refsIn(branch).slice(0, 1)
+}
+
 // The plan document of a run: .fathom/plans/<ref>.md under the session's root. A ref
 // that could leave that directory, or is not a plain token, has no document to read.
 export function planPath(root: string, ref: string): string | null {
