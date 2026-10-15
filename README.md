@@ -35,6 +35,8 @@ In a session that is already running, run `/reload-plugins`. Otherwise it loads 
 
 To update, run `claude plugin marketplace update claude-mods-fathom` and then `claude plugin update fathom-progress@claude-mods-fathom`. According to the Claude Code documentation, a copy installed from GitHub updates only when `version` in `plugin.json` changes.
 
+If you also use `beads-status`, install fathom-progress first. Both draw in the same spot above the prompt, and when both are installed, the one installed first gets the slot. I saw this in both orders. With fathom-progress installed first, the `beads-status` band shows while no Fathom run is active, and the Fathom band takes its place when a run starts. With `beads-status` installed first, its band stayed on screen for the 25 seconds I watched and the Fathom band never appeared, although the mod armed and followed the issue. The order is the order you installed them in, which is also the order of the two entries under `enabledPlugins` in `~/.claude/settings.json`. `claude plugin list` sorts by name, so it does not show it. Reinstalling fathom-progress by itself puts it last, and its band goes behind `beads-status`. Reinstalling `beads-status` by itself is safe. To put the order right, uninstall `beads-status` and install it again.
+
 #### Loading a Folder Instead
 
 You can load the mod's folder without installing it. Do this to try it quickly, or when you use `beads-status` from a folder (see below).
@@ -163,7 +165,7 @@ What I know about the limits:
 ### When It Doesn't Show
 
 - **Nothing appears after `/fathom:execute`.** Run `/plugin` and look for fathom-progress in the line that counts the active mods. If it isn't there, check that the session started after you installed it or saved the setting, then check the path. A session that was already running at that point doesn't load the mod.
-- **`beads-status` draws instead.** If you load both from folders, move fathom-progress ahead of it in `CLAUDE_CODE_PLUGIN_DIRS`. If fathom-progress is installed and `beads-status` is loaded from a folder, load fathom-progress from a folder too.
+- **`beads-status` draws instead.** If you load both from folders, move fathom-progress ahead of it in `CLAUDE_CODE_PLUGIN_DIRS`. If fathom-progress is installed and `beads-status` is loaded from a folder, load fathom-progress from a folder too. If you installed both, `beads-status` was installed first. Uninstall it and install it again so that it comes second (see Install).
 - **The band stays on `[fathom] starting…`.** Either Fathom hasn't created its issue yet, no issue matches the ref you typed, or you ran `scaffold`. Run `bd list --type epic --all` in the project and look for the issue ref in the epic's external ref.
 - **`[fathom] unavailable: …`.** The reason is the first line `bd` printed to stderr. Run the same `bd` command by hand.
 - **You hid it.** Run `/fathom-progress` once more.
