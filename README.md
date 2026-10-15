@@ -4,7 +4,7 @@ fathom-progress is a Claude Code mod that draws a progress band above the prompt
 
 A mod is a plugin that changes Claude Code's own interface or behavior. Fathom is a Claude Code plugin that takes an Asana or Linear issue from breakdown through implementation to an open code review, and records its tasks in Beads, a local issue tracker with a command-line tool called `bd`. fathom-progress reads those Beads tasks and draws them. It never changes them.
 
-I built it with Claude Code. It works in the terminal and in the Claude Code Desktop app.
+I built it with Claude Code. It works in the terminal and in the Claude Code Desktop app. Inside cmux, a terminal app, it also puts the run on the workspace's sidebar row.
 
 ```
 ● PHA-352 Progress band  [ done ][ done ][ now ][ next ][ next ]  2 of 5  40%
@@ -115,6 +115,30 @@ Both show the same information. They draw the bar differently.
 - **Desktop app, dark theme.** The bar is a rounded image (a Scalable Vector Graphics image, SVG) with the count in a pill at the head of the fill. An SVG can't read theme colors, so its colors are fixed to the dark theme.
 - **Desktop app, any other theme.** The bar is drawn from colored boxes that follow the theme. I built and unit-tested this one but have not seen it in the app.
 
+### The cmux Sidebar
+
+cmux is a terminal app for macOS that lists your workspaces in a sidebar. When Claude Code runs inside it, fathom-progress also puts the run on that workspace's row, so you can see where a run stands in a workspace you aren't looking at. You don't need cmux for the band, and outside cmux the mod sends nothing to it.
+
+The row gets a status pill (an icon and one line of text) and a progress bar with a label. cmux draws the bar in its own blue.
+
+| Run | Pill | Bar |
+|---|---|---|
+| Starting | `starting…` | none |
+| Making tasks | `planning`, then `planning · 3 tasks` | none, because the total isn't known yet |
+| Working | `2/5 · now 3`, plus `· 1 in review` when it applies | `SLU-123 · 2 of 5`, two fifths full |
+| Finished | `done 5/5`, in green | `SLU-123 · done`, full |
+| `bd` can't be read | `bd unavailable`, in red | none |
+
+The pill uses the band's colors: coral while Fathom is getting ready, yellow with a hammer icon while it works, green when it is done. The red is macOS's system red, because the Figma file has no failure state to take one from.
+
+The row follows the band. `/fathom-progress` hides it, and `/clear` and the end of the session clear it. The mod's pill has its own name (`fathom`), so cmux's own Claude Code pill stays on the row. The mod doesn't touch the workspace's checklist or description.
+
+What I know about the limits:
+
+- **Two runs in one workspace.** cmux has one progress bar per workspace. If two panes of a workspace each run Fathom, the change that came last replaces the other run's pill and bar, and when one run ends it clears the row until the other run changes. I saw this with two sessions. It is tracked under `claude-mods-fathom-5l2.14.7`.
+- **No notification.** The mod doesn't post a cmux notification (an unread badge). cmux's own Claude Code integration posts a "Completed in <folder>" notification, and the pill already shows the finish on a workspace you aren't looking at.
+- **What I have seen.** A full run, hiding and showing the band, `/clear` and the end of a session, with the workspace selected and not selected, in cmux's dark theme. I haven't seen a light theme or a remote workspace.
+
 ### Commands
 
 - `/fathom-progress` toggles the band between shown and hidden. It replies "Fathom band hidden." or "Fathom band shown." It doesn't report whether a run is active.
@@ -154,6 +178,7 @@ plugins/fathom-progress/
     draw.tsx                    draws the band from a snapshot (Box and Text, plus Svg)
     desktop.ts                  the Svg bar, the dark palette, the Desktop's pixel sizes
     bar.ts                      splits the bar's cells across segments
+    cmux.ts                     pure: a snapshot to the cmux row's pill and bar
     fixtures.ts                 real bd output, captured by the seed script
     *.test.ts, *.test.tsx       unit and render tests
 scripts/seed-fathom-fixture.sh  drives a scratch Beads repo and writes fixtures.ts
@@ -182,6 +207,29 @@ The module registers these hooks:
 | `tool.call` (Bash) | Refreshes when the command touched the run. |
 | `command.run` (`fathom-progress`) | Toggles the band. |
 | `ui.render` (`AbovePrompt`) | Draws the band. |
+
+### The cmux Row
+
+`cmuxEntries` in `cmux.ts` turns a snapshot into the row's entries: a pill (`text`, an SF Symbols icon name and a `color`) or none, and a bar (`value` and `label`) or none. It is pure and has tests, including that no pill is longer than 30 characters, which is about what the row shows before it cuts the text. `register.tsx` sends the entries with `$.process.run(['cmux', ...])`:
+
+| Entries | Command |
+|---|---|
+| a pill | `cmux set-status fathom <text> --icon <name> --color <hex>` |
+| no pill | `cmux clear-status fathom` |
+| a bar | `cmux set-progress <0 to 1> --label <text>` |
+| no bar, and the mod set one | `cmux clear-progress` |
+
+`publish` runs after each snapshot update, after `arm`, at `session.start` (forced), at `session.end` and when `/fathom-progress` toggles the band. The rules are in `syncCmux` and `publish`:
+
+- **Guard.** Nothing is sent unless `CMUX_WORKSPACE_ID` is set, which cmux sets in its own terminals. It is the only variable the mod reads, and `claude plugin validate` lists it.
+- **Only changes.** The entries are compared with what was last sent, so the 10-second poll sends nothing while the run is unchanged.
+- **One at a time.** Sends go through a promise queue, and each reads the snapshot when its turn comes, so the last one wins.
+- **Best effort.** Each call has a 3-second timeout. A failure goes to the debug channel and never reaches the band.
+- **Its own key.** cmux's Claude Code integration owns the `claude_code` pill. The mod's key is `fathom`.
+- **Clears only its own.** `clear-progress` runs only if the mod set a bar, because another tool may own the workspace's one bar. `session.start` sends a forced clear, to remove a pill that a session left when it ended badly and to put the run back after `/reload-plugins`.
+- **Leaves alone** the workspace checklist and the `workspace status set` lane, which cmux's documentation reserves for the user, and the description, which is the user's text.
+
+The sending is in `register.tsx`, so it has no unit tests, for the reason in the next section. I checked it live: run a Fathom issue in a scratch Beads repository inside cmux, and read the row with `cmux list-status` (the pill) and `cmux sidebar-state` (the bar). To count the calls a session makes, put a script named `cmux` first on `PATH` that appends its arguments to a file. With `CMUX_WORKSPACE_ID` unset it recorded none, and with it set the same session recorded three.
 
 ### Why the Code Is Split This Way
 
@@ -246,6 +294,7 @@ The mod logs to the debug channel. Start Claude Code with `--debug-file <path>` 
 - `fathom-progress: armed (execute) by prompt.submit, typed refs PHA-352` says which signal armed the band.
 - `fathom-progress: following PHA-352 (typed PHA-352, branch -)` says which issue the band picked and why. It is logged once per change.
 - `fathom-progress: refresh failed: <reason>` says why the band is `unavailable`.
+- `fathom-progress: cmux set-status exited 1: <first line of stderr>` or `fathom-progress: cmux set-status failed: <reason>` says a call to cmux didn't land. `fathom-progress: cmux sync failed: <reason>` says the whole send failed. None of them touch the band.
 
 Running `claude -p "..." --debug-file f` with a prompt that starts a Fathom skill reproduces the arming without opening the interface. That run uses the `sdk-cli` entry point and not the Desktop app's, so it can't show how the Desktop behaves.
 
@@ -262,6 +311,7 @@ The band follows frames in the Claude Mods Figma file (file key `oG40tY6cPL2NzsJ
 - **More trackers' refs.** `REF` in `lifecycle.ts` reads refs shaped like `PHA-352` (letters, a hyphen, digits). Asana's numeric task ids aren't read.
 - **A ref from plain words.** The Skill tool's call event has no arguments, so a request in plain words can arm the band but can't name the issue. A prompt's text would have to be parsed for it.
 - **Continuing a run without a Fathom command.** `claude --continue` followed by ordinary prompts leaves the band idle, because nothing arms it.
+- **Two runs in one workspace.** The cmux row has one pill key and one bar, so two runs overwrite each other, and one ending clears the other's row. The likely fix is a pill key per pane (from `CMUX_SURFACE_ID`) and clearing the bar only while it still shows this run. The options are in `claude-mods-fathom-5l2.14.7`.
 - **A rounded bar on other Desktop themes.** `Box` has no corner radius and an `Svg` has fixed colors, so only the dark theme gets the rounded bar. Another theme needs its own palette in `desktop.ts` (`paletteFor` returns one only for `dark`).
 
 ### Issue Tracking
@@ -285,3 +335,5 @@ I have run `bd dolt push`. I haven't run `bd dolt pull` from a second clone.
 ## Status
 
 The terminal band, the Desktop's dark-theme SVG bar and the arming on a Team organization account have each been seen working: the first two in a scratch repository, the third in a work profile. The typed-ref and branch-fallback logic has unit tests and headless runs in a real repository, and I haven't yet watched it in a live session. I haven't seen the Desktop's non-dark bar, or the new arming signals in the Desktop app.
+
+The cmux row has been seen working in cmux's dark theme, for a full run, hiding and showing the band, `/clear`, the end of a session, a failed `bd` read, and with the workspace both selected and not. It has been seen going wrong when two runs share a workspace. I haven't seen it in a light theme or a remote workspace, and the Desktop app doesn't use it. I haven't verified that a finished run leaves an unread badge from cmux's own integration.
