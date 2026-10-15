@@ -25,7 +25,7 @@ async function readPlan($: EngineInterface, root: string, ref: string): Promise<
   const path = planPath(root, ref)
   if (path === null) return null
   try {
-    return parsePlan(await $.fs.read(path, { as: 'text' }))
+    return parsePlan(await $.fs.read(path))
   } catch {
     return null
   }

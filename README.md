@@ -227,7 +227,7 @@ Type-check with TypeScript. This repository has no `package.json`, so use any Ty
 tsc -p plugins/fathom-progress --noEmit
 ```
 
-The config extends `.claude-plugin/types/tsconfig.json`, which turns on strict mode and `noUncheckedIndexedAccess`. At the commit that added this README the check reports ten errors (TypeScript 6.0.3): eight in `bar.ts` from indexing arrays, one in `draw.tsx` where a numeric `key` needs to be a string, and one in `register.tsx` where `$.fs.read(path, { as: 'text' })` is typed as `string | FsBytes` and needs to be `$.fs.read(path)`. They don't change behavior, and fixing them is tracked under `claude-mods-fathom-5l2.5`.
+The config extends `.claude-plugin/types/tsconfig.json`, which turns on strict mode and `noUncheckedIndexedAccess`. With TypeScript 6.0.3 the check reports no errors. Under `noUncheckedIndexedAccess` an array index can be `undefined`, so `bar.ts` reads each one with `?? 0`. The types the mod is checked against declare `key` as a string, so `draw.tsx` passes `String(i)`, and `$.fs.read(path)` returns text unless you pass `{ as: 'bytes' }`.
 
 ### Fixtures
 
@@ -284,4 +284,4 @@ I have run `bd dolt push`. I haven't run `bd dolt pull` from a second clone.
 
 ## Status
 
-The terminal band, the Desktop's dark-theme SVG bar and the arming on a Team organization account have each been seen working: the first two in a scratch repository, the third in a work profile. The typed-ref and branch-fallback logic has unit tests and headless runs in a real repository, and I haven't yet watched it in a live session. I haven't seen the Desktop's non-dark bar, or the new arming signals in the Desktop app, and the type-check reports ten errors.
+The terminal band, the Desktop's dark-theme SVG bar and the arming on a Team organization account have each been seen working: the first two in a scratch repository, the third in a work profile. The typed-ref and branch-fallback logic has unit tests and headless runs in a real repository, and I haven't yet watched it in a live session. I haven't seen the Desktop's non-dark bar, or the new arming signals in the Desktop app.

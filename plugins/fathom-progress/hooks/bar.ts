@@ -9,23 +9,26 @@ export const SEGMENT_EDGE = '▉'
 export function allocate(values: number[], cells: number): number[] {
   const total = values.reduce((sum, v) => sum + v, 0)
   const exact = values.map(v => (v / total) * cells)
-  const widths = values.map((v, i) => (v > 0 ? Math.max(1, Math.floor(exact[i])) : 0))
+  const widths = values.map((v, i) => (v > 0 ? Math.max(1, Math.floor(exact[i] ?? 0)) : 0))
   let left = cells - widths.reduce((sum, w) => sum + w, 0)
+
+  // The share of a cell a value is still owed.
+  const owed = (i: number) => (exact[i] ?? 0) - (widths[i] ?? 0)
 
   while (left > 0) {
     let pick = -1
     values.forEach((v, i) => {
-      if (v > 0 && (pick === -1 || exact[i] - widths[i] > exact[pick] - widths[pick])) pick = i
+      if (v > 0 && (pick === -1 || owed(i) > owed(pick))) pick = i
     })
-    widths[pick] += 1
+    widths[pick] = (widths[pick] ?? 0) + 1
     left -= 1
   }
   while (left < 0) {
     let pick = 0
     widths.forEach((w, i) => {
-      if (w > widths[pick]) pick = i
+      if (w > (widths[pick] ?? 0)) pick = i
     })
-    widths[pick] -= 1
+    widths[pick] = (widths[pick] ?? 0) - 1
     left += 1
   }
   return widths

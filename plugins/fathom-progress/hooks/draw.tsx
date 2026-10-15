@@ -268,7 +268,7 @@ function drawHead(ui: Ui, head: Head) {
         ) : head.bar ? (
           <Text wrap="truncate">
             {head.bar.map((s, i) => (
-              <Text key={i} color={s.color} backgroundColor={s.backgroundColor} bold={s.isBold}>
+              <Text key={String(i)} color={s.color} backgroundColor={s.backgroundColor} bold={s.isBold}>
                 {s.text}
               </Text>
             ))}
