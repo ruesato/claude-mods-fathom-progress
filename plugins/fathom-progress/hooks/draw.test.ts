@@ -2,7 +2,7 @@ import { test, expect } from 'claude-code/testing'
 
 import type { RunTask, TaskState } from '../types'
 import { allocate } from './bar'
-import { barCells, barWidth, desktopSegments, equalWidth, growingCells, growingSegments, lineText, lookOf, stepText, toSpans } from './draw'
+import { barCells, barWidth, desktopSegments, equalWidth, growingCells, growingSegments, lineText, lookOf, stepText, titleParts, toSpans } from './draw'
 import type { Cell } from './draw'
 
 const task = (state: TaskState, isInReview = false): RunTask => ({
@@ -224,4 +224,40 @@ test('desktop growing pieces: one for each task made, four cells each, as many a
   // 52 cells hold ten pieces of 4 with a gap of 1 between.
   expect(growingSegments(99, 52)).toHaveLength(10)
   expect(growingSegments(2, 3)).toHaveLength(1)
+})
+
+test('titleParts joins the ref and the title, or gives the ref alone when the plan names no title', async () => {
+  expect(titleParts('PHA-368', 'Home page: Restrict actions and CTAs, add video', '', 80)).toEqual({
+    label: 'PHA-368 Home page: Restrict actions and CTAs, add video',
+    note: '',
+  })
+  expect(titleParts('PHA-368', '', '', 80)).toEqual({ label: 'PHA-368', note: '' })
+  expect(titleParts('PHA-368', '', '· 2 in review', 80)).toEqual({ label: 'PHA-368', note: '· 2 in review' })
+})
+
+test('titleParts cuts the title with an ellipsis to keep the note, and drops the note only when it cannot fit beside the ref', async () => {
+  const title = 'Home page: Restrict actions and CTAs, add video'
+  const note = '· 2 in review'
+
+  // 36 columns: the note and its gap take 14, leaving 22 for the label.
+  expect(titleParts('PHA-368', title, note, 36)).toEqual({ label: 'PHA-368 Home page: Re…', note })
+  expect(titleParts('PHA-368', title, note, 36).label).toHaveLength(22)
+  // 21 columns hold the ref, a gap and the note exactly: the note stays, and the title has no room, so the ref is alone.
+  expect(titleParts('PHA-368', title, note, 21)).toEqual({ label: 'PHA-368', note })
+  // One column less and the note cannot fit beside the ref, so it goes and the label gets the row.
+  expect(titleParts('PHA-368', title, note, 20)).toEqual({ label: 'PHA-368 Home page:…', note: '' })
+  // The cut never leaves a space before the ellipsis.
+  expect(titleParts('PHA-368', 'Home page restrict', '', 14).label).toBe('PHA-368 Home…')
+})
+
+test('titleParts keeps the ref whole while it can, then cuts it, and shows nothing when there is no room at all', async () => {
+  const title = 'Home page: Restrict actions and CTAs, add video'
+
+  // Under three characters of title are not worth showing beside the ref.
+  expect(titleParts('PHA-368', title, '', 9).label).toBe('PHA-368')
+  expect(titleParts('PHA-368', title, '', 10).label).toBe('PHA-368 H…')
+  expect(titleParts('PHA-368', title, '', 7).label).toBe('PHA-368')
+  expect(titleParts('PHA-368', title, '', 5).label).toBe('PHA-…')
+  expect(titleParts('PHA-368', title, '', 1).label).toBe('')
+  expect(titleParts('PHA-368', title, '', 0).label).toBe('')
 })

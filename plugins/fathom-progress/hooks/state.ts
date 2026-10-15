@@ -237,9 +237,12 @@ export function toSnapshot(input: {
   // A finished run shows no review marks: the design's done state is all green, and
   // the plan's Finalization line can land after the last task closes, so nothing here
   // could know when to take the marks off.
+  // The issue's title comes from the plan document's heading, since bd's epic is titled
+  // with the bare ref. A plan with no title leaves it out.
+  const title = input.plan?.title ? { title: input.plan.title } : {}
   const isFinished = run.length > 0 && run.every(t => t.state === 'done')
-  if (isFinished) return { kind: 'finished', ref, tasks: run.map(t => ({ ...t, isInReview: false })) }
-  return { kind: 'executing', ref, tasks: run }
+  if (isFinished) return { kind: 'finished', ref, ...title, tasks: run.map(t => ({ ...t, isInReview: false })) }
+  return { kind: 'executing', ref, ...title, tasks: run }
 }
 
 // The task the line under the bar names: the one in progress, else the next one bd

@@ -6,6 +6,10 @@ import type { Plan, PlanBundle, PlanReview } from '../types'
 // exact ones conventions.md fixes (fathom 2.2.0), because other readers match them
 // too.
 const FIELD = /^\s*- (Issue|Ref|Branch): (.+?)\s*$/
+// The first heading, `# <ref>: <title>`. A title may hold colons, quotes and slashes, so
+// everything after the first colon and space is the title. A heading with no title, as in
+// `# PHA-186 plan`, does not match.
+const HEADING = /^# +([A-Za-z][A-Za-z0-9]*-\d+): +(\S.*?)\s*$/
 const BUNDLE = /^\s*- Bundle (\d+)\/(\d+): (\S+) - (.+?)\s*$/
 const REVIEW = /^\s*- Review: (.+?)\s*$/
 const SUFFIX = /^(.*?)(?: \(bundle (\d+)\/(\d+)\))?$/
@@ -37,12 +41,16 @@ export function parsePlan(text: string): Plan {
     issue: null,
     ref: null,
     branch: null,
+    title: null,
     bundles: [],
     review: null,
     isFinalized: false,
   }
   const reviews: { review: PlanReview; index: number | null }[] = []
   let isFenced = false
+  // Only the first heading is the document's: a later one is a section of its own.
+  let hasHeading = false
+  let heading: { ref: string; title: string } | null = null
 
   for (const line of text.split(/\r?\n/)) {
     if (FENCE.test(line)) {
@@ -50,6 +58,13 @@ export function parsePlan(text: string): Plan {
       continue
     }
     if (isFenced) continue
+
+    if (!hasHeading && /^# /.test(line)) {
+      hasHeading = true
+      const match = HEADING.exec(line)
+      if (match) heading = { ref: match[1] ?? '', title: (match[2] ?? '').replace(/\s+/g, ' ') }
+      continue
+    }
 
     const field = FIELD.exec(line)
     if (field) {
@@ -97,6 +112,11 @@ export function parsePlan(text: string): Plan {
     }
     const bundle: PlanBundle | undefined = plan.bundles.find(b => b.index === index)
     if (bundle) bundle.review = stronger(bundle.review, review)
+  }
+
+  // The heading's title belongs to this plan only when its ref is the plan's own.
+  if (heading && (plan.ref === null || plan.ref.toUpperCase() === heading.ref.toUpperCase())) {
+    plan.title = heading.title
   }
 
   return plan

@@ -287,6 +287,22 @@ function drawLine(ui: Ui, text: string) {
   )
 }
 
+// The terminal's second row as two strings: the label, which is the ref and the issue's
+// title after it (the ref alone when the plan names no title), and the note after it. Both
+// fit `columns`, the room left of the dot. The note goes first when the row is too narrow
+// to hold it beside the ref. Then the title is cut with an ellipsis, and dropped entirely
+// when what is left is not worth reading (under three characters of it), so the ref stays
+// whole while it can.
+export function titleParts(ref: string, title: string, note: string, columns: number): { label: string; note: string } {
+  const gap = 1
+  const label = title === '' ? ref : `${ref} ${title}`
+  const hasNote = note !== '' && ref.length + gap + note.length <= columns
+  const room = columns - (hasNote ? gap + note.length : 0)
+  const cut = (text: string) => (room > 1 ? `${text.slice(0, room - 1).trimEnd()}…` : '')
+  const shown = label.length <= room ? label : room >= ref.length + 3 ? cut(label) : room >= ref.length ? ref : cut(ref)
+  return { label: shown, note: hasNote ? note : '' }
+}
+
 function percentText(percent: number): string {
   return `${percent}%`.padStart(PERCENT_COLS)
 }
@@ -337,8 +353,8 @@ function drawTerminalHead(ui: Ui, head: { bar: Span[] | null; count: string; per
 }
 
 // The second row: the dot for the run's state, the label, and the reviews open after
-// it in the dim color. The note is the part that gives way when the row is narrow.
-function drawTerminalTitle(ui: Ui, dot: string, label: string, note: string) {
+// it in the dim color. `titleParts` has already cut both to the row.
+function drawTerminalTitle(ui: Ui, dot: string, { label, note }: { label: string; note: string }) {
   const { Box, Text } = ui
   return (
     <Box paddingLeft={PAD} columnGap={1}>
@@ -390,9 +406,10 @@ function drawTerminal(ui: Ui, bodyColumns: number, snapshot: Exclude<Snapshot, {
     )
   }
 
-  const label = `${snapshot.ref}${LABEL_SUFFIX}`
   const room = barWidth(bodyColumns)
   const lineColumns = bodyColumns - PAD
+  // What the second row has for the label and the note: the row less the dot and its gap.
+  const titleColumns = lineColumns - 2
 
   if (snapshot.kind === 'creating') {
     const made = snapshot.created
@@ -403,7 +420,7 @@ function drawTerminal(ui: Ui, bodyColumns: number, snapshot: Exclude<Snapshot, {
           count: `${made}`,
           percent: '0%',
         })}
-        {drawTerminalTitle(ui, 'claude', label, '')}
+        {drawTerminalTitle(ui, 'claude', titleParts(snapshot.ref, '', '', titleColumns))}
         {drawTerminalLine(ui, lineText('▸ planning', made === 0 ? 'no tasks yet' : `${made} task${made === 1 ? '' : 's'} so far`, '', lineColumns))}
       </Box>
     )
@@ -423,11 +440,12 @@ function drawTerminal(ui: Ui, bodyColumns: number, snapshot: Exclude<Snapshot, {
     percent: `${percent}%`,
   })
 
+  const issueTitle = snapshot.title ?? ''
   if (isFinished) {
     return (
       <Box flexDirection="column">
         {head}
-        {drawTerminalTitle(ui, dot, label, '')}
+        {drawTerminalTitle(ui, dot, titleParts(snapshot.ref, issueTitle, '', titleColumns))}
         {drawTerminalLine(ui, `✓ ${total}/${total} done`)}
       </Box>
     )
@@ -437,7 +455,7 @@ function drawTerminal(ui: Ui, bodyColumns: number, snapshot: Exclude<Snapshot, {
   return (
     <Box flexDirection="column">
       {head}
-      {drawTerminalTitle(ui, dot, label, reviewNote(tasks))}
+      {drawTerminalTitle(ui, dot, titleParts(snapshot.ref, issueTitle, reviewNote(tasks), titleColumns))}
       {drawTerminalLine(ui, lineText(lead, title, '', lineColumns))}
     </Box>
   )

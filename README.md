@@ -8,7 +8,7 @@ I built it with Claude Code. It works in the terminal and in the Claude Code Des
 
 ```
  ━━━━━━━━━━╸━━━━━━━━━━╸━━━━━━━━━━╸━━━━━━━━━━╸━━━━━━━━━━━ 40%
- ● PHA-352 Progress band · 1 in review
+ ● PHA-368 Home page: Restrict actions and CTAs, add video · 1 in review
  ▸ now 3/5  Add the results toggle
 ```
 
@@ -104,12 +104,12 @@ Asana's numeric task refs are not read yet, and a ref written in a plain-words r
 
 ### What the Band Shows
 
-In the terminal the first row is a bar with one segment per task, with the percent done right after it. The second row is a status dot, the issue's ref and `Progress band`, followed by how many tasks are in review when any are. The third row names the task in progress, or the next one. The Desktop app keeps its earlier arrangement: the dot, ref, bar and percent on the first row, and the task on the second with the reviews open at the end of that row.
+In the terminal the first row is a bar with one segment per task, with the percent done right after it. The second row is a status dot, the issue's ref and its title (`PHA-368 Home page: Restrict actions and CTAs, add video`), followed by how many tasks are in review when any are. The third row names the task in progress, or the next one. The Desktop app keeps its earlier arrangement: the dot, ref, bar and percent on the first row, and the task on the second with the reviews open at the end of that row. The Desktop still writes `Progress band` after the ref, because a long title would take the room its bar needs, and I haven't designed that yet.
 
 | State | Looks like | When |
 |---|---|---|
 | Starting | `fathom starting…` | Fathom has started and the issue isn't in Beads yet, or no issue matches the ref you typed. |
-| Planning | A bar that fills one slot for each task made, `0%`, then `▸ planning` and `3 tasks so far` | The run's issue and some tasks exist, but the plan document isn't written and no task has started, so the total isn't known. |
+| Planning | A bar that fills one slot for each task made, `0%`, the ref alone, then `▸ planning` and `3 tasks so far` | The run's issue and some tasks exist, but the plan document isn't written and no task has started, so the total isn't known. |
 | Executing | The full bar, `▸ now 3/5`, and the task's title | The plan document exists or a task has been claimed, and not every task is closed. |
 | Finished | A green bar and `✓ 5/5 done` | Every task is closed. |
 | Unavailable | `fathom unavailable: <reason>` | `bd` failed or printed something the band can't read. It never shows zeros in its place. |
@@ -130,6 +130,18 @@ Fathom can split a large issue into bundles, a stack of branches that each get t
 The terminal's bar is a thin line, far shorter than a row and too thin for a mark, so there the states are told apart by color alone. The second and third rows carry what the colors can't: how many tasks are in review, and which task is running or next.
 
 The segments are equal widths. Fathom doesn't record a size for each task yet.
+
+#### Where the Title Comes From
+
+Beads doesn't have it. Fathom creates its epic with the bare ref as the title, and gives it no description. The band reads the title from the plan document, `.fathom/plans/<ref>.md`, in its first heading, written as `# PHA-368: Home page: Restrict actions and CTAs, add video`. Everything after the first colon and space is the title, so a title with colons in it stays whole.
+
+Three of the four plans I read in my own repository have that heading. Fathom's conventions don't fix it the way they fix the `Issue`, `Ref` and `Branch` lines, so the band can find no title:
+
+- **While Fathom is making the tasks.** The plan document is written after the last task, so the band shows the ref alone until then.
+- **A plan whose heading has no title.** The fourth plan I read had `# PHA-186 plan`. The band shows the ref alone for it.
+- **A heading for another issue.** If the heading's ref isn't the plan's own `Ref`, the band ignores it.
+
+A title that is too long for the row is cut with an ellipsis. The count of tasks in review gives way first, and the ref stays whole while it can.
 
 ### The Terminal and the Desktop App
 

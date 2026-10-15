@@ -38,13 +38,14 @@ const STACK = `# SLU-200: Split the importer
 - Merge-closer: suppressed
 `
 
-const EMPTY = { issue: null, ref: null, branch: null, bundles: [], review: null, isFinalized: false }
+const EMPTY = { issue: null, ref: null, branch: null, title: null, bundles: [], review: null, isFinalized: false }
 
-test('parsePlan reads the Issue, Ref and Branch lines, and finds no bundles in a plan that was not split', async () => {
+test('parsePlan reads the title, the Issue, Ref and Branch lines, and finds no bundles in a plan that was not split', async () => {
   expect(parsePlan(SINGLE)).toEqual({
     issue: 'https://linear.app/acme/issue/SLU-123/add-the-progress-band',
     ref: 'SLU-123',
     branch: 'feat/slu-123-progress-band',
+    title: 'Add the progress band',
     bundles: [],
     review: null,
     isFinalized: false,
@@ -142,4 +143,50 @@ test('text with no plan lines, or review lines that name no id and url, reads as
   expect(parsePlan('')).toEqual(EMPTY)
   expect(parsePlan('Just some notes.\n\n- a bullet\n')).toEqual(EMPTY)
   expect(parsePlan('- Review: only-one-token\n- Review: a b c\n- Review: \n')).toEqual(EMPTY)
+})
+
+// The title is the first heading, `# <ref>: <title>`, the way Fathom wrote the plans in the
+// repositories it ran in. conventions.md fixes the labels of the Issue, Ref and Branch lines
+// and says the Issue section carries the title, but gives the heading no label, so a plan
+// may have none.
+
+test('the title is what follows the ref in the first heading, and it may hold colons, quotes and slashes', async () => {
+  const plan = (heading: string) => parsePlan(`${heading}\n\n- Ref: PHA-368\n`).title
+
+  expect(plan('# PHA-368: Home page: Restrict actions and CTAs, add video')).toBe('Home page: Restrict actions and CTAs, add video')
+  expect(plan('# PHA-368: Relabel the 3-way results control: "Preferred" / "Full" / Grid')).toBe('Relabel the 3-way results control: "Preferred" / "Full" / Grid')
+  // Runs of spaces and trailing spaces do not reach the band.
+  expect(plan('# PHA-368:   Home   page   ')).toBe('Home page')
+})
+
+test('a heading with no title, or with a different ref, or that is not the first one, gives no title', async () => {
+  const plan = (text: string) => parsePlan(text).title
+
+  // `# PHA-186 plan` is a heading some of Fathom's own plans carry.
+  expect(plan('# PHA-186 plan\n\n- Ref: PHA-186\n')).toBeNull()
+  expect(plan('# PHA-186:\n\n- Ref: PHA-186\n')).toBeNull()
+  // A plan about another issue is not this issue's title.
+  expect(plan('# PHA-999: Someone else\'s plan\n\n- Ref: PHA-368\n')).toBeNull()
+  // Only the first heading counts: it names no title, so a later one does not.
+  expect(plan('# PHA-186 plan\n\n# PHA-186: Later heading\n- Ref: PHA-186\n')).toBeNull()
+  // A section heading is not the title.
+  expect(plan('## PHA-368: Not the title\n- Ref: PHA-368\n')).toBeNull()
+  expect(plan('- Ref: PHA-368\n')).toBeNull()
+  expect(plan('')).toBeNull()
+})
+
+test('the title is matched to the plan\'s ref without regard to case, and is kept when the plan names no ref', async () => {
+  expect(parsePlan('# pha-368: Home page\n- Ref: PHA-368\n').title).toBe('Home page')
+  expect(parsePlan('# PHA-368: Home page\n').title).toBe('Home page')
+})
+
+test('a heading inside a code fence is an example, not the title', async () => {
+  const fenced = '```\n# PHA-368: Example title\n```\n\n# PHA-368: The real title\n- Ref: PHA-368\n'
+
+  expect(parsePlan(fenced).title).toBe('The real title')
+  expect(parsePlan('```\n# PHA-368: Example title\n```\n- Ref: PHA-368\n').title).toBeNull()
+})
+
+test('the title reads from a plan written with Windows line endings', async () => {
+  expect(parsePlan('# PHA-368: Home page\r\n\r\n- Ref: PHA-368\r\n').title).toBe('Home page')
 })

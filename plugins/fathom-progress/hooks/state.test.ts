@@ -258,3 +258,20 @@ test('tasks bd lists in a free order, with no edges and one timestamp, fall back
 
   expect(tasksOf(snapshot).map(t => t.id)).toEqual(['a', 'b', 'c'])
 })
+
+test('an executing or finished run carries the issue\'s title from the plan document, and has none when the plan names none', async () => {
+  const titled = parsePlan('# SLU-123: Add the progress band\n\n- Ref: SLU-123\n')
+
+  expect(snapshotOf(fx.claimedThird, titled)).toMatchObject({ kind: 'executing', ref: 'SLU-123', title: 'Add the progress band' })
+  expect(snapshotOf(fx.allClosed, titled)).toMatchObject({ kind: 'finished', ref: 'SLU-123', title: 'Add the progress band' })
+
+  // A plan with no title leaves the field out, so the band falls back to the ref.
+  for (const plan of [PLAN, parsePlan('# SLU-123 plan\n\n- Ref: SLU-123\n')]) {
+    expect(snapshotOf(fx.claimedThird, plan)).not.toHaveProperty('title')
+    expect(snapshotOf(fx.allClosed, plan)).not.toHaveProperty('title')
+  }
+})
+
+test('a run still being created has no title, since the plan document is written after its tasks', async () => {
+  expect(snapshotOf(fx.created3, null)).toEqual({ kind: 'creating', ref: 'SLU-123', created: 3 })
+})

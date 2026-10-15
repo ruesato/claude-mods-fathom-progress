@@ -27,6 +27,10 @@ export type Plan = {
   issue: string | null
   ref: string | null
   branch: string | null
+  // The issue's title, read from the first heading, `# <ref>: <title>`. Fathom's
+  // conventions fix the labels of the Issue, Ref and Branch lines but not the heading, so
+  // a plan whose heading names no title (`# PHA-186 plan`) has none.
+  title: string | null
   bundles: PlanBundle[]
   review: PlanReview | null
   isFinalized: boolean
@@ -49,14 +53,16 @@ export type RunTask = {
 // What the band shows. `idle` is not armed, so the band yields. `starting` is armed
 // with no run found yet. `creating` has an epic and the tasks made so far, with no
 // total: the plan document that fixes it is written after the last task. `executing`
-// and `finished` carry every task. `unavailable` carries why bd could not be read,
-// so the band can say so instead of showing zeros.
+// and `finished` carry every task, and the issue's `title` when the plan document
+// names one. `creating` has no title because the plan is written after the tasks, and
+// bd holds none: Fathom makes the epic with the bare ref as its title. `unavailable`
+// carries why bd could not be read, so the band can say so instead of showing zeros.
 export type Snapshot =
   | { kind: 'idle' }
   | { kind: 'starting' }
   | { kind: 'creating'; ref: string; created: number }
-  | { kind: 'executing'; ref: string; tasks: RunTask[] }
-  | { kind: 'finished'; ref: string; tasks: RunTask[] }
+  | { kind: 'executing'; ref: string; title?: string; tasks: RunTask[] }
+  | { kind: 'finished'; ref: string; title?: string; tasks: RunTask[] }
   | { kind: 'unavailable'; reason: string }
 
 declare module 'claude-code' {

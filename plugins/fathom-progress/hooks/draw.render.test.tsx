@@ -52,9 +52,10 @@ const PLANNED: Snapshot = { kind: 'executing', ref: 'SLU-123', tasks: runOf(['ne
 const EXECUTING: Snapshot = {
   kind: 'executing',
   ref: 'SLU-123',
+  title: 'Add the progress band',
   tasks: runOf(['done', 'done', 'inProgress', 'waiting', 'waiting'], [1]),
 }
-const DONE: Snapshot = { kind: 'finished', ref: 'SLU-123', tasks: runOf(['done', 'done', 'done', 'done', 'done']) }
+const DONE: Snapshot = { kind: 'finished', ref: 'SLU-123', title: 'Add the progress band', tasks: runOf(['done', 'done', 'done', 'done', 'done']) }
 
 // The terminal's bar: heavy lines, each segment but the last ending in a heavy half line,
 // which is the gap. At 80 columns the bar has 74 cells, of which 70 divide among five tasks:
@@ -133,7 +134,8 @@ test('terminal planned: five grey segments, 0% at the end of the bar row, the do
   const { ui, head, title, line, tree } = await show(PLANNED, 'terminal')
 
   expect(head).toBe(`${BAR_OF_FIVE}0%`)
-  expect(title).toBe('●SLU-123 Progress band')
+  // The plan names no title here, so the ref stands alone.
+  expect(title).toBe('●SLU-123')
   expect(line).toBe('▸ next 1/5  Draft the plan doc')
   // Five grey segments are one run: nothing separates neighbors of a color.
   expect(barRuns(tree)).toEqual([{ text: BAR_OF_FIVE, color: 'subtle' }])
@@ -153,7 +155,7 @@ test('terminal executing: the bar in each state\'s color, 40%, the reviews open 
     { text: seg(14), color: 'warning' },
     { text: seg(14) + seg(14, false), color: 'subtle' },
   ])
-  expect(title).toBe('●SLU-123 Progress band· 1 in review')
+  expect(title).toBe('●SLU-123 Add the progress band· 1 in review')
   // The note is its own dim Text on the title row, and the line beneath no longer carries it.
   const note = (await ui.find({ type: 'Text', text: '· 1 in review' })) as unknown as { props?: { dimColor?: boolean } } | undefined
   expect(note?.props?.dimColor).toBe(true)
@@ -167,12 +169,13 @@ test('terminal between tasks: the next task is named and the reviews open are co
   const between: Snapshot = {
     kind: 'executing',
     ref: 'SLU-123',
+    title: 'Add the progress band',
     tasks: runOf(['done', 'done', 'next', 'waiting', 'waiting'], [0, 1]),
   }
   const { ui, head, title, line } = await show(between, 'terminal')
 
   expect(head).toBe(`${BAR_OF_FIVE}40%`)
-  expect(title).toBe('●SLU-123 Progress band· 2 in review')
+  expect(title).toBe('●SLU-123 Add the progress band· 2 in review')
   expect(line).toBe('▸ next 3/5  Wire the lifecycle hooks')
   await ui.unmount()
 })
@@ -183,7 +186,7 @@ test('terminal done: a full green bar, 100%, no reviews, and the count beneath',
 
   expect(head).toBe(`${BAR_OF_FIVE}100%`)
   expect(barRuns(tree)).toEqual([{ text: BAR_OF_FIVE, color: 'success' }])
-  expect(title).toBe('●SLU-123 Progress band')
+  expect(title).toBe('●SLU-123 Add the progress band')
   expect(line).toBe('✓ 5/5 done')
   await ui.unmount()
 })
@@ -208,7 +211,8 @@ test('terminal creating: the tasks made so far fill slots of the bar, 0% where t
 
   const three = await show({ kind: 'creating', ref: 'SLU-123', created: 3 }, 'terminal')
   expect(three.head).toBe(`${BAR_OF_THREE_SLOTS}0%`)
-  expect(three.title).toBe('●SLU-123 Progress band')
+  // The plan is written after the tasks, so a run being created has no title yet.
+  expect(three.title).toBe('●SLU-123')
   expect(three.line).toBe('▸ planning  3 tasks so far')
   expect(barRuns(three.tree)).toEqual([{ text: BAR_OF_THREE_SLOTS, color: 'subtle' }])
   await three.ui.unmount()
@@ -286,6 +290,60 @@ test('a narrower terminal shortens the bar, and a row with no room for one shows
   expect(crowded.head).toContain('0 of 80')
   expect(crowded.head).not.toContain('━')
   await crowded.ui.unmount()
+})
+
+test('the second row is the ref and the issue\'s title, with the reviews open after it', async ($, on) => {
+  const { show } = band($, on)
+  const home: Snapshot = {
+    kind: 'executing',
+    ref: 'PHA-368',
+    title: 'Home page: Restrict actions and CTAs, add video',
+    tasks: runOf(['done', 'done', 'inProgress', 'waiting', 'waiting'], [1]),
+  }
+
+  const wide = await show(home, 'terminal', 100)
+  expect(wide.title).toBe('●PHA-368 Home page: Restrict actions and CTAs, add video· 1 in review')
+  // The label and the note are separate Texts, the note dim, and the dot keeps its color.
+  expect(await wide.ui.find({ type: 'Text', text: 'PHA-368 Home page: Restrict actions and CTAs, add video' })).toBeDefined()
+  expect(await wide.ui.find({ type: 'Text', text: '· 1 in review' })).toBeDefined()
+  await wide.ui.unmount()
+
+  // The desktop's band keeps its own label.
+  const desktop = await show(home, 'desktop', 100)
+  expect(desktop.head.startsWith('●PHA-368 Progress band')).toBe(true)
+  await desktop.ui.unmount()
+})
+
+test('a title too long for the row is cut with an ellipsis, the reviews open stay while they fit, and the ref stays whole', async ($, on) => {
+  const { show } = band($, on)
+  const home: Snapshot = {
+    kind: 'executing',
+    ref: 'PHA-368',
+    title: 'Home page: Restrict actions and CTAs, add video',
+    tasks: runOf(['done', 'done', 'inProgress', 'waiting', 'waiting'], [1]),
+  }
+
+  // 40 columns: a cell in, the dot and its gap, leave 37. The note takes 14 with its gap, so the label gets 23.
+  const medium = await show(home, 'terminal', 40)
+  expect(medium.title).toBe('●PHA-368 Home page: Res…· 1 in review')
+  await medium.ui.unmount()
+
+  // 24 columns leave 21: the ref, a gap and the note need exactly that, so the note stays and the title has no room.
+  const tight = await show(home, 'terminal', 24)
+  expect(tight.title).toBe('●PHA-368· 1 in review')
+  await tight.ui.unmount()
+
+  // One column less and the note cannot fit beside the ref, so it goes and the label gets the row.
+  const narrow = await show(home, 'terminal', 23)
+  expect(narrow.title).toBe('●PHA-368 Home page:…')
+  expect(narrow.title).not.toContain('review')
+  await narrow.ui.unmount()
+
+  // Without a note a long title still fits the row.
+  const plain: Snapshot = { ...home, tasks: runOf(['done', 'done', 'inProgress', 'waiting', 'waiting']) }
+  const noReviews = await show(plain, 'terminal', 40)
+  expect(noReviews.title).toBe('●PHA-368 Home page: Restrict actions…')
+  await noReviews.ui.unmount()
 })
 
 // Whether any Box under a node sets `prop`: the head row is laid out by what its parts
