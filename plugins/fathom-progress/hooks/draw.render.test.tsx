@@ -10,7 +10,7 @@ import { drawBand } from './draw'
 /**
  * Draws `drawBand` through the test kit, on each surface the mod claims, to read the
  * tree it returns: the text of each row. The kit exercises the tree under that
- * surface's element table, never its paint, so colors, the 7/8 block and the icon
+ * surface's element table, never its paint, so colors, the heavy line and the icon
  * glyphs still need a look at the live band, in the terminal and in the desktop app.
  *
  * The plugin's own `ui.render` hook reads state atoms, which are empty in the test
@@ -18,8 +18,7 @@ import { drawBand } from './draw'
  * snapshot the test chooses.
  */
 
-const SURFACES = ['terminal', 'desktop'] as const
-type Surface = (typeof SURFACES)[number]
+type Surface = 'terminal' | 'desktop'
 
 const PROPS = {
   hasSurvey: false,
@@ -48,7 +47,7 @@ function runOf(states: TaskState[], reviewed: number[] = []): RunTask[] {
   }))
 }
 
-// The three frames of the design: A1 planned, A2 executing, A3 done.
+// The frames of the design: planned, executing, done and creating.
 const PLANNED: Snapshot = { kind: 'executing', ref: 'SLU-123', tasks: runOf(['next', 'waiting', 'waiting', 'waiting', 'waiting']) }
 const EXECUTING: Snapshot = {
   kind: 'executing',
@@ -56,6 +55,13 @@ const EXECUTING: Snapshot = {
   tasks: runOf(['done', 'done', 'inProgress', 'waiting', 'waiting'], [1]),
 }
 const DONE: Snapshot = { kind: 'finished', ref: 'SLU-123', tasks: runOf(['done', 'done', 'done', 'done', 'done']) }
+
+// The terminal's bar: heavy lines, each segment but the last ending in a heavy half line,
+// which is the gap. Five tasks in 55 cells are eleven wide each, and three made so far fill
+// three of five slots.
+const seg = (n: number, hasNext = true) => '━'.repeat(hasNext ? n - 1 : n) + (hasNext ? '╸' : '')
+const BAR_OF_FIVE = seg(11).repeat(4) + seg(11, false)
+const BAR_OF_THREE_SLOTS = seg(11) + seg(11) + seg(11, false)
 
 type Node = string | { type?: string; props?: Record<string, unknown>; children?: readonly Node[] }
 
@@ -73,6 +79,17 @@ function filledBoxes(node: unknown): { color: unknown; width: unknown }[] {
   return [...own, ...(n.children ?? []).flatMap(filledBoxes)]
 }
 
+// The runs of the terminal's bar under a node, in drawing order: each colored Text of
+// heavy lines and the color it is drawn in. Neighboring segments of one color are one run,
+// since nothing separates them. The Text that wraps the whole bar has no color of its own,
+// so a bar of one unbroken run is not counted twice.
+function barRuns(node: unknown): { text: string; color: unknown }[] {
+  const n = node as { type?: string; props?: Record<string, unknown>; children?: Node[] } | string | null | undefined
+  if (!n || typeof n === 'string') return []
+  const own = n.type === 'Text' && n.props?.color !== undefined && /^[━╸]+$/.test(textOf(n)) ? [{ text: textOf(n), color: n.props.color }] : []
+  return [...own, ...(n.children ?? []).flatMap(barRuns)]
+}
+
 // The kit takes one `on` per test, before the first mount, so the stub is registered
 // once and the snapshot it draws is swapped between mounts.
 function band($: Engine, on: On) {
@@ -85,8 +102,9 @@ function band($: Engine, on: On) {
     return tree ?? next(e)
   })
 
-  // Mounts the band on `surface` and reads its rows: the top gap is padding, so the
-  // band is the head row and the line beneath.
+  // Mounts the band on `surface` and reads its rows. The terminal's are the bar with the
+  // percent, the title row, and the line beneath; the desktop's are the head row, which
+  // holds the title, and the line beneath it. `title` is empty on the desktop.
   return {
     wasNull: () => isNull,
     async show(snapshot: Snapshot, surface: Surface, bodyColumns = 80, withPalette: Palette | null = null) {
@@ -99,57 +117,75 @@ function band($: Engine, on: On) {
         requestId: 'r',
         props: { ...PROPS, bodyColumns },
       })
-      const tree = (await ui.drawn()) as unknown as { children?: Node[] } | null
+      const tree = (await ui.drawn()) as unknown as { props?: Record<string, unknown>; children?: Node[] } | null
       const row = (i: number) => {
         const node = tree?.children?.[i]
         return node === undefined ? '' : textOf(node)
       }
-      return { ui, head: row(0), line: row(1), tree }
+      const isTerminal = surface === 'terminal'
+      return { ui, head: row(0), title: isTerminal ? row(1) : '', line: row(isTerminal ? 2 : 1), tree }
     },
   }
 }
 
-test('planned: a grey band with the first task next, 0%, and the next task named beneath', async ($, on) => {
+test('terminal planned: five grey segments, 0% at the end of the bar row, the dot and label, and the next task named beneath', async ($, on) => {
   const { show } = band($, on)
+  const { ui, head, title, line, tree } = await show(PLANNED, 'terminal')
 
-  for (const surface of SURFACES) {
-    const { ui, head, line } = await show(PLANNED, surface)
-
-    expect(head.startsWith('●SLU-123 Progress band')).toBe(true)
-    expect(head).toContain('0 of 5')
-    expect(head.endsWith('  0%')).toBe(true)
-    expect(line).toBe('▸ next 1/5  Draft the plan doc')
-    await ui.unmount()
-  }
+  expect(head).toBe(`${BAR_OF_FIVE}0%`)
+  expect(title).toBe('●SLU-123 Progress band')
+  expect(line).toBe('▸ next 1/5  Draft the plan doc')
+  // Five grey segments are one run: nothing separates neighbors of a color.
+  expect(barRuns(tree)).toEqual([{ text: BAR_OF_FIVE, color: 'subtle' }])
+  // The bar row is the band's first row: there is no row of padding above it.
+  expect(tree?.props?.paddingTop).toBeUndefined()
+  await ui.unmount()
 })
 
-test('executing: the bar, 40%, and the task in progress named beneath with the reviews open', async ($, on) => {
+test('terminal executing: the bar in each state\'s color, 40%, the reviews open beside the label, and the task in progress beneath', async ($, on) => {
   const { show } = band($, on)
+  const { ui, head, title, line, tree } = await show(EXECUTING, 'terminal')
 
-  for (const surface of SURFACES) {
-    const { ui, head, line } = await show(EXECUTING, surface)
-
-    expect(head).toContain('2 of 5')
-    expect(head).toContain('◐')
-    expect(head).toContain('●')
-    expect(head.endsWith(' 40%')).toBe(true)
-    expect(line).toBe('▸ now 3/5  Wire the lifecycle hooks  · 1 in review')
-    expect(await ui.find({ type: 'Text', text: '▸ now 3/5  Wire the lifecycle hooks  · 1 in review' })).toBeDefined()
-    await ui.unmount()
-  }
+  expect(head).toBe(`${BAR_OF_FIVE}40%`)
+  expect(barRuns(tree)).toEqual([
+    { text: seg(11), color: 'success' },
+    { text: seg(11), color: 'claude' },
+    { text: seg(11), color: 'warning' },
+    { text: seg(11) + seg(11, false), color: 'subtle' },
+  ])
+  expect(title).toBe('●SLU-123 Progress band· 1 in review')
+  // The note is its own dim Text on the title row, and the line beneath no longer carries it.
+  const note = (await ui.find({ type: 'Text', text: '· 1 in review' })) as unknown as { props?: { dimColor?: boolean } } | undefined
+  expect(note?.props?.dimColor).toBe(true)
+  expect(line).toBe('▸ now 3/5  Wire the lifecycle hooks')
+  expect(await ui.find({ type: 'Text', text: '▸ now 3/5  Wire the lifecycle hooks' })).toBeDefined()
+  await ui.unmount()
 })
 
-test('done: a full green bar, 100%, and the count beneath', async ($, on) => {
+test('terminal between tasks: the next task is named and the reviews open are counted beside the label', async ($, on) => {
   const { show } = band($, on)
-
-  for (const surface of SURFACES) {
-    const { ui, head, line } = await show(DONE, surface)
-
-    expect(head).toContain('5 of 5')
-    expect(head.endsWith('100%')).toBe(true)
-    expect(line).toBe('✓ 5/5 done')
-    await ui.unmount()
+  const between: Snapshot = {
+    kind: 'executing',
+    ref: 'SLU-123',
+    tasks: runOf(['done', 'done', 'next', 'waiting', 'waiting'], [0, 1]),
   }
+  const { ui, head, title, line } = await show(between, 'terminal')
+
+  expect(head).toBe(`${BAR_OF_FIVE}40%`)
+  expect(title).toBe('●SLU-123 Progress band· 2 in review')
+  expect(line).toBe('▸ next 3/5  Wire the lifecycle hooks')
+  await ui.unmount()
+})
+
+test('terminal done: a full green bar, 100%, no reviews, and the count beneath', async ($, on) => {
+  const { show } = band($, on)
+  const { ui, head, title, line, tree } = await show(DONE, 'terminal')
+
+  expect(head).toBe(`${BAR_OF_FIVE}100%`)
+  expect(barRuns(tree)).toEqual([{ text: BAR_OF_FIVE, color: 'success' }])
+  expect(title).toBe('●SLU-123 Progress band')
+  expect(line).toBe('✓ 5/5 done')
+  await ui.unmount()
 })
 
 test('the dot is grey until a task starts, the band\'s color while it runs, and green when done', async ($, on) => {
@@ -164,35 +200,59 @@ test('the dot is grey until a task starts, the band\'s color while it runs, and 
   expect(await colorOfDot(PLANNED)).toBe('inactive')
   expect(await colorOfDot(EXECUTING)).toBe('claude')
   expect(await colorOfDot(DONE)).toBe('success')
+  expect(await colorOfDot({ kind: 'creating', ref: 'SLU-123', created: 3 })).toBe('claude')
 })
 
-test('creating shows the tasks made so far with no total and no percent', async ($, on) => {
+test('terminal creating: the tasks made so far fill slots of the bar, 0% where the percent goes, and no total', async ($, on) => {
   const { show } = band($, on)
 
-  for (const surface of SURFACES) {
-    const { ui, head, line } = await show({ kind: 'creating', ref: 'SLU-123', created: 3 }, surface)
+  const three = await show({ kind: 'creating', ref: 'SLU-123', created: 3 }, 'terminal')
+  expect(three.head).toBe(`${BAR_OF_THREE_SLOTS}0%`)
+  expect(three.title).toBe('●SLU-123 Progress band')
+  expect(three.line).toBe('▸ planning  3 tasks so far')
+  expect(barRuns(three.tree)).toEqual([{ text: BAR_OF_THREE_SLOTS, color: 'subtle' }])
+  await three.ui.unmount()
 
-    expect(head.startsWith('●SLU-123 Progress band')).toBe(true)
-    expect(head).not.toContain('%')
-    expect(line).toBe('▸ planning  3 tasks so far')
-    await ui.unmount()
-  }
+  const none = await show({ kind: 'creating', ref: 'SLU-123', created: 0 }, 'terminal')
+  expect(none.head).toBe('0%')
+  expect(none.line).toBe('▸ planning  no tasks yet')
+  await none.ui.unmount()
 
-  const { ui, line } = await show({ kind: 'creating', ref: 'SLU-123', created: 0 }, 'terminal')
-  expect(line).toBe('▸ planning  no tasks yet')
+  const one = await show({ kind: 'creating', ref: 'SLU-123', created: 1 }, 'terminal')
+  expect(one.line).toBe('▸ planning  1 task so far')
+  await one.ui.unmount()
+})
+
+test('desktop creating shows the tasks made so far with no total and no percent', async ($, on) => {
+  const { show } = band($, on)
+  const { ui, head, line } = await show({ kind: 'creating', ref: 'SLU-123', created: 3 }, 'desktop')
+
+  expect(head.startsWith('●SLU-123 Progress band')).toBe(true)
+  expect(head).not.toContain('%')
+  expect(line).toBe('▸ planning  3 tasks so far')
   await ui.unmount()
 })
 
-test('starting and unavailable say so in one dim line', async ($, on) => {
+test('terminal starting and unavailable say so in one dim line, without the brackets the desktop keeps', async ($, on) => {
   const { show } = band($, on)
+  const reason = 'bd list exited 1: Error: no beads database found'
 
   const starting = await show({ kind: 'starting' }, 'terminal')
-  expect(await starting.ui.find({ type: 'Text', text: '[fathom] starting…' })).toBeDefined()
+  expect(await starting.ui.find({ type: 'Text', text: 'fathom starting…' })).toBeDefined()
+  expect(starting.tree?.props?.paddingTop).toBeUndefined()
   await starting.ui.unmount()
 
-  const down = await show({ kind: 'unavailable', reason: 'bd list exited 1: Error: no beads database found' }, 'desktop')
-  expect(await down.ui.find({ type: 'Text', text: /^\[fathom\] unavailable: bd list exited 1/ })).toBeDefined()
+  const down = await show({ kind: 'unavailable', reason }, 'terminal')
+  expect(await down.ui.find({ type: 'Text', text: `fathom unavailable: ${reason}` })).toBeDefined()
   await down.ui.unmount()
+
+  const desktopStarting = await show({ kind: 'starting' }, 'desktop')
+  expect(await desktopStarting.ui.find({ type: 'Text', text: '[fathom] starting…' })).toBeDefined()
+  await desktopStarting.ui.unmount()
+
+  const desktopDown = await show({ kind: 'unavailable', reason }, 'desktop')
+  expect(await desktopDown.ui.find({ type: 'Text', text: /^\[fathom\] unavailable: bd list exited 1/ })).toBeDefined()
+  await desktopDown.ui.unmount()
 })
 
 test('idle draws nothing, so the event passes on and beads-status can draw', async ($, on) => {
@@ -203,19 +263,40 @@ test('idle draws nothing, so the event passes on and beads-status can draw', asy
   expect(wasNull()).toBe(true)
 })
 
-test('a row too narrow for a bar shows the count instead, and more tasks than cells does too', async ($, on) => {
+test('a narrower terminal shortens the bar, and a row with no room for one shows the count instead', async ($, on) => {
   const { show } = band($, on)
 
-  const narrow = await show(EXECUTING, 'terminal', 30)
+  // 40 columns: 33 cells for the bar, of which 30 divide into five segments of six. The two
+  // grey ones are one run of twelve.
+  const shorter = await show(EXECUTING, 'terminal', 40)
+  expect(barRuns(shorter.tree).map(r => r.text.length)).toEqual([6, 6, 6, 12])
+  expect(shorter.head.endsWith('40%')).toBe(true)
+  await shorter.ui.unmount()
+
+  // 18 columns leave 11 cells, under the 12 a bar is worth.
+  const narrow = await show(EXECUTING, 'terminal', 18)
   expect(narrow.head).toContain('2 of 5')
-  expect(narrow.head).not.toContain('▉')
+  expect(narrow.head).not.toContain('━')
+  expect(narrow.head.endsWith('40%')).toBe(true)
   await narrow.ui.unmount()
 
+  // More tasks than cells does too.
   const many: Snapshot = { kind: 'executing', ref: 'SLU-123', tasks: runOf(Array.from({ length: 60 }, () => 'waiting' as const)) }
   const crowded = await show(many, 'terminal', 80)
   expect(crowded.head).toContain('0 of 60')
-  expect(crowded.head).not.toContain('▉')
+  expect(crowded.head).not.toContain('━')
   await crowded.ui.unmount()
+})
+
+test('the line beneath is cut to the row, a cell in from the left', async ($, on) => {
+  const { show } = band($, on)
+  const { ui, line } = await show(EXECUTING, 'terminal', 24)
+
+  // 24 columns less the cell of padding: the lead, then the title cut with an ellipsis.
+  expect(line).toHaveLength(23)
+  expect(line.startsWith('▸ now 3/5  Wire')).toBe(true)
+  expect(line.endsWith('…')).toBe(true)
+  await ui.unmount()
 })
 
 test('nine tasks, the over-seven case, still draw a bar with every task in it', async ($, on) => {
@@ -225,9 +306,14 @@ test('nine tasks, the over-seven case, still draw a bar with every task in it', 
     ref: 'SLU-123',
     tasks: runOf(['done', 'done', 'done', 'inProgress', 'waiting', 'waiting', 'waiting', 'waiting', 'waiting']),
   }
+  // 55 cells, of which 54 divide into nine segments of six, with eight half lines between them.
+  // The three done are one run, the one in progress is a run, and the five waiting are a run.
   const terminal = await show(nine, 'terminal')
-  expect(terminal.head).toContain('3 of 9')
-  expect([...terminal.head].filter(c => c === '▉').length).toBeGreaterThanOrEqual(7)
+  expect(barRuns(terminal.tree).map(r => [r.color, r.text.length])).toEqual([['success', 18], ['warning', 6], ['subtle', 30]])
+  expect([...terminal.head].filter(c => c === '━' || c === '╸')).toHaveLength(54)
+  expect([...terminal.head].filter(c => c === '╸')).toHaveLength(8)
+  expect(terminal.head.endsWith('33%')).toBe(true)
+  expect(terminal.line).toContain('now 4/9')
   await terminal.ui.unmount()
 
   // On the desktop the nine segments are too narrow for `3 of 9`; each task still has its
@@ -235,9 +321,34 @@ test('nine tasks, the over-seven case, still draw a bar with every task in it', 
   const desktop = await show(nine, 'desktop')
   expect(filledBoxes(desktop.tree)).toHaveLength(9)
   expect([...desktop.head].filter(c => c === '✓')).toHaveLength(3)
-  expect(desktop.head).not.toContain('▉')
+  expect(desktop.head).not.toContain('━')
   expect(desktop.line).toContain('now 4/9')
   await desktop.ui.unmount()
+})
+
+test('desktop planned, executing and done keep the head row, the bar with its step text, and the note on the line beneath', async ($, on) => {
+  const { show } = band($, on)
+
+  const planned = await show(PLANNED, 'desktop')
+  expect(planned.head.startsWith('●SLU-123 Progress band')).toBe(true)
+  expect(planned.head).toContain('0 of 5')
+  expect(planned.head.endsWith('  0%')).toBe(true)
+  expect(planned.line).toBe('▸ next 1/5  Draft the plan doc')
+  await planned.ui.unmount()
+
+  const executing = await show(EXECUTING, 'desktop')
+  expect(executing.head).toContain('2 of 5')
+  expect(executing.head).toContain('◐')
+  expect(executing.head).toContain('●')
+  expect(executing.head.endsWith(' 40%')).toBe(true)
+  expect(executing.line).toBe('▸ now 3/5  Wire the lifecycle hooks  · 1 in review')
+  await executing.ui.unmount()
+
+  const done = await show(DONE, 'desktop')
+  expect(done.head).toContain('5 of 5')
+  expect(done.head.endsWith('100%')).toBe(true)
+  expect(done.line).toBe('✓ 5/5 done')
+  await done.ui.unmount()
 })
 
 test('on the desktop, with a palette for the theme, the bar is one Svg with the head pill, and the step text is not drawn beside it', async ($, on) => {
@@ -253,12 +364,12 @@ test('on the desktop, with a palette for the theme, the bar is one Svg with the 
   // The label, percent and line stay Text, so they follow the theme.
   expect(head.startsWith('●SLU-123 Progress band')).toBe(true)
   expect(head.endsWith(' 40%')).toBe(true)
-  expect(head).not.toContain('▉')
+  expect(head).not.toContain('━')
   expect(line).toBe('▸ now 3/5  Wire the lifecycle hooks  · 1 in review')
   await ui.unmount()
 })
 
-test('on the desktop with no palette for the theme the bar is boxes in the theme\'s colors, never block characters; the terminal keeps its cell bar', async ($, on) => {
+test('on the desktop with no palette for the theme the bar is boxes in the theme\'s colors, never block characters; the terminal keeps its thin bar', async ($, on) => {
   const { show } = band($, on)
 
   const unknownTheme = await show(EXECUTING, 'desktop', 80, null)
@@ -268,12 +379,13 @@ test('on the desktop with no palette for the theme the bar is boxes in the theme
   expect(boxes.map(b => b.color)).toEqual(['success', 'claude', 'warning', 'subtle', 'subtle'])
   expect(new Set(boxes.map(b => b.width)).size).toBe(1)
   expect(unknownTheme.head).toContain('2 of 5')
-  expect(unknownTheme.head).not.toContain('▉')
+  expect(unknownTheme.head).not.toContain('━')
   await unknownTheme.ui.unmount()
 
+  // A palette is for the desktop's Svg; the terminal ignores it and draws no filled box.
   const terminal = await show(EXECUTING, 'terminal', 80, DARK)
-  expect(terminal.head).toContain('2 of 5')
-  expect(terminal.head).toContain('▉')
+  expect(terminal.head).toContain('━')
+  expect(terminal.head).not.toContain('of')
   expect(filledBoxes(terminal.tree)).toHaveLength(0)
   await terminal.ui.unmount()
 })
@@ -291,13 +403,13 @@ test('the desktop Svg bar draws for planned and finished runs too, and while the
   expect(svg?.props?.alt).toBe('3 tasks made so far')
   expect(svg?.props?.width).toBe(108)
   expect(svg?.props?.source).not.toContain('class="pill"')
-  expect(creating.head).not.toContain('▉')
+  expect(creating.head).not.toContain('━')
   await creating.ui.unmount()
 
   // With no palette for the theme it is three blank boxes in the theme's grey, not blocks.
   const plain = await show({ kind: 'creating', ref: 'SLU-123', created: 3 }, 'desktop', 80, null)
   expect(await plain.ui.find({ type: 'Svg' })).toBeUndefined()
   expect(filledBoxes(plain.tree).map(b => [b.color, b.width])).toEqual([['subtle', 4], ['subtle', 4], ['subtle', 4]])
-  expect(plain.head).not.toContain('▉')
+  expect(plain.head).not.toContain('━')
   await plain.ui.unmount()
 })

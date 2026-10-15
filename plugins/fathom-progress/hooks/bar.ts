@@ -1,8 +1,4 @@
 export const MAX_BAR_CELLS = 48
-// A cell is the smallest gap a Box can leave, so the gap between segments is
-// drawn instead: each segment but the last ends in a 7/8-wide block, leaving
-// the last eighth of its cell in the terminal's own background.
-export const SEGMENT_EDGE = '▉'
 
 // Splits `cells` across `values` in proportion (largest remainder), giving every
 // nonzero value at least one cell. Needs cells >= the number of nonzero values.

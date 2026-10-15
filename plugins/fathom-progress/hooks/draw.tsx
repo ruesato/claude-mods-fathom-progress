@@ -1,7 +1,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import type { RunTask, Snapshot } from '../types'
-import { SEGMENT_EDGE, allocate } from './bar'
+import { allocate } from './bar'
 import { CELL_PX, PERCENT_CELLS, barSvg, desktopBarWidth, growingSvg } from './desktop'
 import type { Palette } from './desktop'
 import { currentOf, progressOf } from './state'
@@ -13,13 +13,15 @@ import { currentOf, progressOf } from './state'
 type Ui = ReturnType<EngineInterface['ui']['resolve']>
 
 // What a segment looks like per state. Colors are theme keys, so the band follows the
-// person's theme; `icon` is the first mark in the segment, so the states that matter
-// never rest on color alone. `text` is the key that reads on the fill. The design's
+// person's theme; `icon` is the first mark in a desktop segment, so the states that matter
+// never rest on color alone there. `text` is the key that reads on the fill. The design's
 // state legend gives each state a color: done is `success`, a done task whose review is
 // open is `claude`, the one in progress is `warning` (yellow) and marked. A task that is
 // next or waiting is plain dark grey with no mark: grey and unmarked means not started,
 // and the line under the bar names which one is next. Nothing else is coral, green or
 // yellow, so those three read as "in review", "done" and "in progress" and nothing else.
+// The terminal's bar is 5px tall, too thin to hold a mark, so it carries `color` alone and
+// the rows beneath it say what the colors cannot (`· 2 in review`, `▸ now 3/5`).
 const LOOKS = {
   waiting: { color: 'subtle', text: 'text', icon: '' },
   next: { color: 'subtle', text: 'text', icon: '' },
@@ -36,43 +38,57 @@ const DOT = '●'
 const LABEL_SUFFIX = ' Progress band'
 // `100%`, right-aligned.
 const PERCENT_COLS = 4
-// The dot and the gap after it, which the second row leaves blank so its text lines up
-// with the label above.
+// Desktop: the dot and the gap after it, which the line under the bar leaves blank so
+// its text lines up with the label above.
 const INSET = 2
-// The engine draws its `[-]` on the first row of the band, so a row of padding keeps
-// the bar clear of it, as the beads-status band does.
+// Desktop: the engine draws its `[-]` on the first row of the band, so a row of padding
+// keeps the bar clear of it, as the beads-status band does. The terminal takes no gap:
+// its first row is the bar with the percent at its end, and the `[-]` sits beside it as in
+// the design, since `bodyColumns` already leaves out the engine's cells.
 const TOP_GAP = 1
-// The most cells the bar gets. Five tasks of ten cells each have room in the last
-// segment for its icon, a blank, `5 of 5` and a blank after it; at nine they do not.
-// The design's bar is 420px, about 47 cells, and this is 50, about 450px.
-const BAR_CELLS = 50
+
+// The terminal's rows follow the States frame of the design (Figma 59:791): the bar on
+// a row of its own with the percent at the far end, then the dot, ref and label with the
+// reviews open, then the dim line.
+//
+// The bar's width. The design's is 500px, which is 55 cells at 9px a cell.
+const BAR_CELLS = 55
+// The design's bar is 5px tall in a 19px row. A heavy horizontal line is the nearest a
+// cell draws that sits in the middle of its row, as the design's bar does, and neighbors
+// join without a seam.
+const BAR_GLYPH = '━'
+// The design leaves 2px between segments. No line character stops closer to a cell's edge
+// than its middle, so every segment but the last ends in a heavy half line, drawn from the
+// left edge of its cell to the middle. That leaves half a cell (about 4.5px) between
+// segments. The beads-status band gets about 1px with a 7/8 block, but those are full-height.
+const SEGMENT_EDGE = '╸'
+// The design's 8px of padding at either end of a row, as a cell.
+const PAD = 1
 // Below this many cells a bar says too little to be worth its row; the row falls back
 // to the count.
 const MIN_BAR_CELLS = 12
-// The dot, the gaps between the dot, the label, the bar and the percent, and the percent.
-const CHROME = 1 + 3 + PERCENT_COLS
+// The padding at both ends, the gap between the bar and the percent, and the percent.
+const CHROME = PAD + 1 + PERCENT_COLS + PAD
+// While the run is still being made there is no total to divide the bar by, so it is this
+// many equal slots and each task made fills one, from the left.
+const GROWING_SLOTS = 5
 
-// One character cell of the bar, and a run of cells that share a style.
-export type Cell = {
-  char: string
-  color: string | undefined
-  backgroundColor: string | undefined
-  isBold: boolean
-}
-export type Span = { text: string; color: string | undefined; backgroundColor: string | undefined; isBold: boolean }
+// One character cell of the bar, and a run of cells that share a color.
+export type Cell = { char: string; color: string | undefined }
+export type Span = { text: string; color: string | undefined }
 
-function cell(char: string, color?: string, backgroundColor?: string, isBold = false): Cell {
-  return { char, color, backgroundColor, isBold }
+function cell(char: string, color?: string): Cell {
+  return { char, color }
 }
 
 // How many cells the bar gets on a row `bodyColumns` wide. `bodyColumns` already
 // leaves out the engine's cells at the right end.
-export function barWidth(bodyColumns: number, label: string): number {
-  return Math.min(BAR_CELLS, bodyColumns - label.length - CHROME)
+export function barWidth(bodyColumns: number): number {
+  return Math.min(BAR_CELLS, bodyColumns - CHROME)
 }
 
-// The bar's width for `count` equal segments in `room` cells: the largest multiple of
-// the count that fits, so every segment is the same width. Splitting 48 cells five ways
+// The cells for `count` equal segments in `room` cells: the largest multiple of the
+// count that fits, so every segment is the same width. Splitting 48 cells five ways
 // leaves three over, and those went to the first segments, which showed as a one-cell
 // step between them. The bar is a few cells shorter instead (45 for five tasks). This
 // goes when Fathom records sizes, since then the widths are meant to differ.
@@ -80,89 +96,56 @@ export function equalWidth(room: number, count: number): number {
   return count > 0 ? Math.floor(room / count) * count : 0
 }
 
-// The bar as cells: one segment per task, all the same width for now. Every segment
-// but the last ends in the 7/8 block that bar.ts draws the gap with, and starts with
-// its icon (one cell in, when the segment is wide enough to inset it).
-//
-// The step text, `done of total`, is written over the end of the bar in each cell's own
-// fill, with a blank cell of the segment's fill after it. The design's head pill is left
-// out of the terminal version: five cells of a 48-cell bar, drawn over the segments
-// beneath it, it read as extra spacing between them. The last segment keeps its icon only
-// when it holds the icon, a blank, the text and the blank after it; narrower than that,
-// the text keeps its margin and the segment goes unmarked.
+// A segment of `width` cells: heavy lines, with the last cell a half line when another
+// segment follows it, which is the gap.
+function segmentCells(width: number, color: string, hasNext: boolean): Cell[] {
+  return Array.from({ length: width }, (_, c) => cell(hasNext && c === width - 1 ? SEGMENT_EDGE : BAR_GLYPH, color))
+}
+
+// The bar as cells: one segment per task, all the same width for now, each but the last
+// ending in the half line that makes the gap. A segment is its state's color and nothing
+// else: the design's bar has no icons and no step text. It may be shorter than `cells` (the
+// largest that divides evenly), and empty when there is not a cell for every task.
 //
 // Widths are equal because no task records a size. When Fathom records one, the one
 // line to change is the values `allocate` splits the cells by: a task's size where
 // there is one, 1 where there is not.
-const TEXT_MARGIN = 1
-
 export function barCells(tasks: readonly RunTask[], cells: number): Cell[] {
+  const fill = equalWidth(cells, tasks.length)
+  if (tasks.length === 0 || fill < tasks.length) return []
+
   const widths = allocate(
     tasks.map(() => 1),
-    cells,
+    fill,
   )
-  const { done, total } = progressOf(tasks)
-  const text = stepText(done, total)
-  const hasText = cells >= text.length * 2 + 2
-  const row: Cell[] = []
-
-  tasks.forEach((task, i) => {
-    const look = lookOf(task)
-    const width = widths[i] ?? 0
-    const isLast = i === tasks.length - 1
-    const fill = isLast ? width : width - 1
-    const iconAt = fill >= 3 ? 1 : 0
-    const hasRoom = !isLast || !hasText || width >= text.length + TEXT_MARGIN + 3
-
-    for (let c = 0; c < fill; c++) {
-      row.push(cell(c === iconAt && look.icon && hasRoom ? look.icon : ' ', look.text, look.color))
-    }
-    if (!isLast && width > 0) row.push(cell(SEGMENT_EDGE, look.color))
-  })
-
-  if (hasText) {
-    const start = cells - TEXT_MARGIN - text.length
-    for (let k = 0; k < text.length; k++) {
-      const under = row[start + k]
-      // A segment's gap cell has no fill of its own, so its text reads as plain text.
-      row[start + k] = cell(text[k] ?? ' ', under?.backgroundColor ? under.color : 'text', under?.backgroundColor, true)
-    }
-  }
-  return row
+  return tasks.flatMap((task, i) => segmentCells(widths[i] ?? 0, lookOf(task).color, i < tasks.length - 1))
 }
 
-// How many tasks are closed, out of how many: the text the design puts in the pill.
+// How many tasks are closed, out of how many.
 export function stepText(done: number, total: number): string {
   return `${done} of ${total}`
 }
 
-// While the run is still being made there is no total to divide the bar by, so each
-// task made takes a segment of its own width and the bar fills from the left as they
-// come, up to what the bar holds. The rest is blank.
-const GROWING_WIDTH = 4
-
+// While the run is still being made, each task made takes one of the bar's slots and the
+// rest is blank. More tasks than slots leave the bar full; the line beneath counts them.
 export function growingCells(created: number, cells: number): Cell[] {
-  const row: Cell[] = []
-  const shown = Math.min(created, Math.floor(cells / GROWING_WIDTH))
-  const look = LOOKS.waiting
-  for (let i = 0; i < shown; i++) {
-    row.push(cell(' ', look.text, look.color), cell(' ', look.text, look.color), cell(' ', look.text, look.color))
-    row.push(cell(SEGMENT_EDGE, look.color))
-  }
-  while (row.length < cells) row.push(cell(' '))
-  return row
+  const slot = Math.floor(cells / GROWING_SLOTS)
+  if (slot < 1) return []
+  const shown = Math.min(created, GROWING_SLOTS)
+  const { color } = LOOKS.waiting
+  return Array.from({ length: shown }).flatMap((_, i) => segmentCells(slot, color, i < shown - 1))
 }
 
-// Runs of cells with one style become one Text, so a 48-cell bar is a handful of
-// elements, not 48.
+// Runs of cells with one color become one Text, so a 55-cell bar is a handful of
+// elements, not 55.
 export function toSpans(cells: readonly Cell[]): Span[] {
   const spans: Span[] = []
   for (const c of cells) {
     const last = spans[spans.length - 1]
-    if (last && last.color === c.color && last.backgroundColor === c.backgroundColor && last.isBold === c.isBold) {
+    if (last && last.color === c.color) {
       last.text += c.char
     } else {
-      spans.push({ text: c.char, color: c.color, backgroundColor: c.backgroundColor, isBold: c.isBold })
+      spans.push({ text: c.char, color: c.color })
     }
   }
   return spans
@@ -185,7 +168,7 @@ export type DesktopSegment = { width: number; color: string; textColor: string; 
 
 // Equal segments with a gap between, across `room` cells; none when they would be too
 // narrow to mark. The step text sits in the last, with its icon dropped when the two do
-// not fit together, as in the terminal.
+// not fit together.
 export function desktopSegments(tasks: readonly RunTask[], room: number): DesktopSegment[] {
   const count = tasks.length
   if (count === 0) return []
@@ -235,8 +218,6 @@ function drawSegments(ui: Ui, segments: readonly DesktopSegment[]) {
 type Head = {
   dot: string
   label: string
-  // The bar, or null when the row is too narrow for one: the count stands in.
-  bar: Span[] | null
   // The desktop's bar, an Svg, which takes the bar's place when there is one.
   svg?: { source: string; alt: string; width: number; height: number } | null
   // The desktop's bar for a theme with no Svg palette, which takes it when there is one.
@@ -245,8 +226,8 @@ type Head = {
   percent: string
 }
 
-// The first row: a dot for the run's state, the label, the bar, and the percent. The
-// gaps between them are layout, not text, so each part can be found on its own.
+// The desktop's first row: a dot for the run's state, the label, the bar, and the percent.
+// The gaps between them are layout, not text, so each part can be found on its own.
 function drawHead(ui: Ui, head: Head) {
   const { Box, Text } = ui
   // Only the desktop's element table has Svg.
@@ -265,14 +246,6 @@ function drawHead(ui: Ui, head: Head) {
           <Svg source={head.svg.source} alt={head.svg.alt} width={head.svg.width} height={head.svg.height} />
         ) : hasSegments && head.segments ? (
           drawSegments(ui, head.segments)
-        ) : head.bar ? (
-          <Text wrap="truncate">
-            {head.bar.map((s, i) => (
-              <Text key={String(i)} color={s.color} backgroundColor={s.backgroundColor} bold={s.isBold}>
-                {s.text}
-              </Text>
-            ))}
-          </Text>
         ) : (
           <Text dimColor>{head.count}</Text>
         )}
@@ -314,12 +287,162 @@ function percentText(percent: number): string {
   return `${percent}%`.padStart(PERCENT_COLS)
 }
 
+// The line under the bar names the task in progress, else the next one; with neither
+// (between two tasks) it only counts.
+function runLine(tasks: readonly RunTask[], done: number, total: number) {
+  const current = currentOf(tasks)
+  const task = current ? tasks[current.index] : undefined
+  const lead = current
+    ? `▸ ${current.state === 'inProgress' ? 'now' : 'next'} ${current.index + 1}/${total}`
+    : `▸ ${done}/${total} done`
+  return { lead, title: task?.title ?? '' }
+}
+
+function reviewNote(tasks: readonly RunTask[]): string {
+  const reviews = tasks.filter(t => t.isInReview).length
+  return reviews > 0 ? `· ${reviews} in review` : ''
+}
+
+// The terminal's first row: the bar, then the percent bold at the far end of the row,
+// where the engine's `[-]` follows it. The row is a cell in from each side. The count
+// stands in for a bar that has no room.
+function drawTerminalHead(ui: Ui, head: { bar: Span[] | null; count: string; percent: string }) {
+  const { Box, Text } = ui
+  return (
+    <Box paddingX={PAD} columnGap={1}>
+      <Box flexShrink={0}>
+        {head.bar ? (
+          <Text wrap="truncate">
+            {head.bar.map((s, i) => (
+              <Text key={String(i)} color={s.color}>
+                {s.text}
+              </Text>
+            ))}
+          </Text>
+        ) : (
+          <Text dimColor>{head.count}</Text>
+        )}
+      </Box>
+      <Box flexGrow={1} justifyContent="flex-end">
+        <Text bold>{head.percent}</Text>
+      </Box>
+    </Box>
+  )
+}
+
+// The second row: the dot for the run's state, the label, and the reviews open after
+// it in the dim color. The note is the part that gives way when the row is narrow.
+function drawTerminalTitle(ui: Ui, dot: string, label: string, note: string) {
+  const { Box, Text } = ui
+  return (
+    <Box paddingLeft={PAD} columnGap={1}>
+      <Box flexShrink={0}>
+        <Text color={dot}>{DOT}</Text>
+      </Box>
+      <Box flexShrink={0}>
+        <Text>{label}</Text>
+      </Box>
+      {note ? (
+        <Box flexShrink={1}>
+          <Text dimColor wrap="truncate-end">
+            {note}
+          </Text>
+        </Box>
+      ) : null}
+    </Box>
+  )
+}
+
+// The third row, flush under the dot.
+function drawTerminalLine(ui: Ui, text: string) {
+  const { Box, Text } = ui
+  return (
+    <Box paddingLeft={PAD}>
+      <Text dimColor wrap="truncate-end">
+        {text}
+      </Text>
+    </Box>
+  )
+}
+
+function drawTerminal(ui: Ui, bodyColumns: number, snapshot: Exclude<Snapshot, { kind: 'idle' }>) {
+  const { Box, Text } = ui
+
+  if (snapshot.kind === 'starting') {
+    return (
+      <Box>
+        <Text dimColor>fathom starting…</Text>
+      </Box>
+    )
+  }
+
+  if (snapshot.kind === 'unavailable') {
+    return (
+      <Box>
+        <Text dimColor wrap="truncate-end">{`fathom unavailable: ${snapshot.reason}`}</Text>
+      </Box>
+    )
+  }
+
+  const label = `${snapshot.ref}${LABEL_SUFFIX}`
+  const room = barWidth(bodyColumns)
+  const lineColumns = bodyColumns - PAD
+
+  if (snapshot.kind === 'creating') {
+    const made = snapshot.created
+    return (
+      <Box flexDirection="column">
+        {drawTerminalHead(ui, {
+          bar: room >= MIN_BAR_CELLS ? toSpans(growingCells(made, room)) : null,
+          count: `${made}`,
+          percent: '0%',
+        })}
+        {drawTerminalTitle(ui, 'claude', label, '')}
+        {drawTerminalLine(ui, lineText('▸ planning', made === 0 ? 'no tasks yet' : `${made} task${made === 1 ? '' : 's'} so far`, '', lineColumns))}
+      </Box>
+    )
+  }
+
+  const { tasks } = snapshot
+  const isFinished = snapshot.kind === 'finished'
+  const { done, total, percent } = progressOf(tasks)
+  const hasStarted = tasks.some(t => t.state === 'done' || t.state === 'inProgress')
+  // Grey until the first task starts, the band's own color while it runs, green once done.
+  const dot = isFinished ? LOOKS.done.color : hasStarted ? 'claude' : 'inactive'
+  // More tasks than cells cannot each have one, so the row falls back to the count.
+  const cells = room >= MIN_BAR_CELLS ? barCells(tasks, room) : []
+  const head = drawTerminalHead(ui, {
+    bar: cells.length > 0 ? toSpans(cells) : null,
+    count: stepText(done, total),
+    percent: `${percent}%`,
+  })
+
+  if (isFinished) {
+    return (
+      <Box flexDirection="column">
+        {head}
+        {drawTerminalTitle(ui, dot, label, '')}
+        {drawTerminalLine(ui, `✓ ${total}/${total} done`)}
+      </Box>
+    )
+  }
+
+  const { lead, title } = runLine(tasks, done, total)
+  return (
+    <Box flexDirection="column">
+      {head}
+      {drawTerminalTitle(ui, dot, label, reviewNote(tasks))}
+      {drawTerminalLine(ui, lineText(lead, title, '', lineColumns))}
+    </Box>
+  )
+}
+
 // The band for a snapshot, or null when there is nothing to draw (the caller passes the
 // event on, so beads-status can draw there).
 //
 // `target` says where it draws. On the desktop, with a palette for the person's theme, the
-// bar is the Svg of the design's frames, with its head pill; anywhere else it is the cell
-// bar with the step text inside it.
+// bar is the Svg of the design's frames, with its head pill; with none it is boxes in the
+// theme's colors. Anywhere else it is the terminal's band, three rows with a thin bar.
 export function drawBand(
   ui: Ui,
   bodyColumns: number,
@@ -329,6 +452,8 @@ export function drawBand(
   const { Box, Text } = ui
 
   if (snapshot.kind === 'idle') return null
+
+  if (target.surface !== 'desktop') return drawTerminal(ui, bodyColumns, snapshot)
 
   if (snapshot.kind === 'starting') {
     return (
@@ -347,21 +472,18 @@ export function drawBand(
   }
 
   const label = `${snapshot.ref}${LABEL_SUFFIX}`
-  const room = barWidth(bodyColumns, label)
 
-  const isDesktop = target.surface === 'desktop'
-  const hasSvg = isDesktop && !!target.palette && 'Svg' in ui
+  const hasSvg = !!target.palette && 'Svg' in ui
   // The cells the desktop's bar has, from the pixels the row leaves.
-  const desktopCells = isDesktop ? Math.floor(desktopBarWidth(bodyColumns, label) / CELL_PX) : 0
+  const desktopCells = Math.floor(desktopBarWidth(bodyColumns, label) / CELL_PX)
 
   if (snapshot.kind === 'creating') {
     const made = snapshot.created
     const svg = hasSvg && target.palette ? growingSvg(made, { palette: target.palette, width: desktopBarWidth(bodyColumns, label) }) : null
-    const segments = isDesktop && !svg ? growingSegments(made, desktopCells) : null
+    const segments = !svg ? growingSegments(made, desktopCells) : null
     const head = drawHead(ui, {
       dot: 'claude',
       label,
-      bar: !isDesktop && room >= MIN_BAR_CELLS ? toSpans(growingCells(made, room)) : null,
       svg,
       segments,
       count: `${made}`,
@@ -381,21 +503,16 @@ export function drawBand(
   const hasStarted = tasks.some(t => t.state === 'done' || t.state === 'inProgress')
   // Grey until the first task starts, the band's own color while it runs, green once done.
   const dot = isFinished ? LOOKS.done.color : hasStarted ? 'claude' : 'inactive'
-  // More tasks than cells cannot each have one, so the row falls back to the count.
-  const cells = equalWidth(room, tasks.length)
-  const hasBar = tasks.length > 0 && cells >= Math.max(MIN_BAR_CELLS, tasks.length)
 
   const svg =
     hasSvg && target.palette && tasks.length > 0
       ? barSvg(tasks, { palette: target.palette, isFinished, width: desktopBarWidth(bodyColumns, label) })
       : null
 
-  const segments = isDesktop && !svg && tasks.length > 0 ? desktopSegments(tasks, desktopCells) : null
+  const segments = !svg && tasks.length > 0 ? desktopSegments(tasks, desktopCells) : null
   const head = drawHead(ui, {
     dot,
     label,
-    // The desktop never draws the cell bar, whose blocks do not line up in its font.
-    bar: !isDesktop && hasBar ? toSpans(barCells(tasks, cells)) : null,
     svg,
     segments,
     count: stepText(done, total),
@@ -411,19 +528,11 @@ export function drawBand(
     )
   }
 
-  // The line under the bar names the task in progress, else the next one; with neither
-  // (between two tasks) it only counts.
-  const current = currentOf(tasks)
-  const task = current ? tasks[current.index] : undefined
-  const lead = current
-    ? `▸ ${current.state === 'inProgress' ? 'now' : 'next'} ${current.index + 1}/${total}`
-    : `▸ ${done}/${total} done`
-  const reviews = tasks.filter(t => t.isInReview).length
-
+  const { lead, title } = runLine(tasks, done, total)
   return (
     <Box flexDirection="column" paddingTop={TOP_GAP}>
       {head}
-      {drawLine(ui, lineText(lead, task?.title ?? '', reviews > 0 ? `· ${reviews} in review` : '', bodyColumns - INSET))}
+      {drawLine(ui, lineText(lead, title, reviewNote(tasks), bodyColumns - INSET))}
     </Box>
   )
 }

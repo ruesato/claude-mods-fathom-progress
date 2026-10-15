@@ -7,11 +7,12 @@ A mod is a plugin that changes Claude Code's own interface or behavior. Fathom i
 I built it with Claude Code. It works in the terminal and in the Claude Code Desktop app. Inside cmux, a terminal app, it also puts the run on the workspace's sidebar row.
 
 ```
-● PHA-352 Progress band  [ done ][ done ][ now ][ next ][ next ]  2 of 5  40%
-  ▸ now 3/5  Add the results toggle  · 1 in review
+ ━━━━━━━━━━╸━━━━━━━━━━╸━━━━━━━━━━╸━━━━━━━━━━╸━━━━━━━━━━━                       40%
+ ● PHA-352 Progress band · 1 in review
+ ▸ now 3/5  Add the results toggle
 ```
 
-*A schematic of the layout, not a screenshot. Each task is a segment of the bar, colored by its state. In the terminal the step count is written over the end of the bar.*
+*A schematic of the terminal layout, not a screenshot. Each task is a segment of the bar, colored by its state, and the percent is at the right end of the bar's row.*
 
 ## Setup
 
@@ -75,7 +76,7 @@ Run a Fathom issue.
 /fathom:execute PHA-352
 ```
 
-The band shows `[fathom] starting…` right away, then switches to the run's tasks once Fathom has made them. Replace `PHA-352` with one of your issues.
+The band shows `fathom starting…` right away (`[fathom] starting…` in the Desktop app), then switches to the run's tasks once Fathom has made them. Replace `PHA-352` with one of your issues.
 
 ## Using It
 
@@ -87,7 +88,7 @@ The band appears when Fathom's `execute` skill starts, and not before. Three sig
 - Claude calls the Skill tool with a Fathom skill, for example because you asked for it in plain words. This depends on Claude choosing to call the tool.
 - The engine reports the skill's own text as a skill prompt. On the Team organization account I used, this signal never reached the mod (see "Team Organization Accounts" below), so the first two carry it there.
 
-`/fathom:scaffold` writes no Beads tasks, so there is no run to follow. It shows `[fathom] starting…` and stops there.
+`/fathom:scaffold` writes no Beads tasks, so there is no run to follow. It shows `fathom starting…` and stops there.
 
 The band goes away when the session ends, and after `/clear`. When no Fathom run is active it passes the space to `beads-status`.
 
@@ -95,7 +96,7 @@ The band goes away when the session ends, and after `/clear`. When no Fathom run
 
 The band follows one issue at a time and picks it in this order:
 
-1. **The ref you typed.** `/fathom:execute pha-352` follows PHA-352, in any status, whether the run is open or finished. A ref with no matching issue shows `[fathom] starting…` and never another run. Refs are matched without regard to case, and a URL that contains the ref (a Linear issue URL does) works as well as the ref.
+1. **The ref you typed.** `/fathom:execute pha-352` follows PHA-352, in any status, whether the run is open or finished. A ref with no matching issue shows `fathom starting…` and never another run. Refs are matched without regard to case, and a URL that contains the ref (a Linear issue URL does) works as well as the ref.
 2. **The branch.** With no ref typed, the band reads the ref from the current git branch (`feat/pha-352-relabel-results-view-control` gives PHA-352). Fathom resumes a run the same way, so a run you pick up in a new session shows up. An issue created since you started wins over the branch's.
 3. **The newest run.** With no ref and no ref in the branch name, the band follows the issue created since the invocation, or else the open one with the most recent activity.
 
@@ -103,34 +104,38 @@ Asana's numeric task refs are not read yet, and a ref written in a plain-words r
 
 ### What the Band Shows
 
-The first row is a status dot, the issue's ref, a bar with one segment per task, the step count and the percent done. The second row names the task in progress, or the next one.
+In the terminal the first row is a bar with one segment per task, and the percent done at its right end. The second row is a status dot, the issue's ref and `Progress band`, followed by how many tasks are in review when any are. The third row names the task in progress, or the next one. The Desktop app keeps its earlier arrangement: the dot, ref, bar and percent on the first row, and the task on the second with the reviews open at the end of that row.
 
 | State | Looks like | When |
 |---|---|---|
-| Starting | `[fathom] starting…` | Fathom has started and the issue isn't in Beads yet, or no issue matches the ref you typed. |
-| Planning | A growing bar, then `▸ planning` and `3 tasks so far` | The run's issue and some tasks exist, but the plan document isn't written and no task has started, so the total isn't known. |
+| Starting | `fathom starting…` | Fathom has started and the issue isn't in Beads yet, or no issue matches the ref you typed. |
+| Planning | A bar that fills one slot for each task made, `0%`, then `▸ planning` and `3 tasks so far` | The run's issue and some tasks exist, but the plan document isn't written and no task has started, so the total isn't known. |
 | Executing | The full bar, `▸ now 3/5`, and the task's title | The plan document exists or a task has been claimed, and not every task is closed. |
 | Finished | A green bar and `✓ 5/5 done` | Every task is closed. |
-| Unavailable | `[fathom] unavailable: <reason>` | `bd` failed or printed something the band can't read. It never shows zeros in its place. |
+| Unavailable | `fathom unavailable: <reason>` | `bd` failed or printed something the band can't read. It never shows zeros in its place. |
 
-Each task segment has a color and, except for tasks not yet started, a mark, so the states don't depend on color alone.
+The Desktop app writes the starting and unavailable lines with brackets (`[fathom] starting…`), and while tasks are being made it leaves the percent blank where the terminal shows `0%`.
 
-| Task | Color | Mark |
+Each task segment has a color. In the Desktop app, every task except those not yet started also has a mark, so the states don't depend on color alone there.
+
+| Task | Color | Mark (Desktop app) |
 |---|---|---|
 | Done | Green | ✓ |
 | Done, review still open | Coral | ◐ |
 | In progress | Yellow | ● |
 | Next or waiting | Dark grey | none |
 
-Fathom can split a large issue into bundles, a stack of branches that each get their own review. A task is in review when it is done and its bundle has a review recorded in the run's plan document (`.fathom/plans/<ref>.md`). The plan document doesn't say whether that review has merged, so a recorded review counts as open, and the mark stays until every task is closed. A finished run shows no review marks. When some tasks are in review, the second row adds `· 2 in review`.
+Fathom can split a large issue into bundles, a stack of branches that each get their own review. A task is in review when it is done and its bundle has a review recorded in the run's plan document (`.fathom/plans/<ref>.md`). The plan document doesn't say whether that review has merged, so a recorded review counts as open, and the task stays in review until every task is closed. A finished run has no reviews open. When some tasks are in review, the second row adds `· 2 in review`.
+
+The terminal's bar is a thin line, far shorter than a row and too thin for a mark, so there the states are told apart by color alone. The second and third rows carry what the colors can't: how many tasks are in review, and which task is running or next.
 
 The segments are equal widths. Fathom doesn't record a size for each task yet.
 
 ### The Terminal and the Desktop App
 
-Both show the same information. They draw the bar differently.
+Both show the same run. They arrange and draw it differently.
 
-- **Terminal.** The bar is made of block characters, with the step count (`2 of 5`) written over the end of it.
+- **Terminal.** The band is three rows, as in the design: the bar and percent, then the dot, ref and label, then the task. The bar is a row of heavy line characters (`━`), up to 55 characters wide, so it is thin like the design's bar and sits in the middle of its row. It has no marks and no step count in it. The design leaves 2 pixels between segments, and no line character stops closer to the edge of a character than its middle. Each segment but the last therefore ends in a heavy half line (`╸`), which leaves half a character between segments, about 4.5 pixels at the width the design uses. I tried a quarter-height block (`▂`) first, and its gaps were a whole character wide. `beads-status` gets about 1 pixel with a seven-eighths block (`▉`), but its bar is a full row tall. The percent sits at the right end of the row, where the design puts it.
 - **Desktop app, dark theme.** The bar is a rounded image (a Scalable Vector Graphics image, SVG) with the count in a pill at the head of the fill. An SVG can't read theme colors, so its colors are fixed to the dark theme.
 - **Desktop app, any other theme.** The bar is drawn from colored boxes that follow the theme. I built and unit-tested this one but have not seen it in the app.
 
@@ -166,8 +171,8 @@ What I know about the limits:
 
 - **Nothing appears after `/fathom:execute`.** Run `/plugin` and look for fathom-progress in the line that counts the active mods. If it isn't there, check that the session started after you installed it or saved the setting, then check the path. A session that was already running at that point doesn't load the mod.
 - **`beads-status` draws instead.** If you load both from folders, move fathom-progress ahead of it in `CLAUDE_CODE_PLUGIN_DIRS`. If fathom-progress is installed and `beads-status` is loaded from a folder, load fathom-progress from a folder too. If you installed both, `beads-status` was installed first. Uninstall it and install it again so that it comes second (see Install).
-- **The band stays on `[fathom] starting…`.** Either Fathom hasn't created its issue yet, no issue matches the ref you typed, or you ran `scaffold`. Run `bd list --type epic --all` in the project and look for the issue ref in the epic's external ref.
-- **`[fathom] unavailable: …`.** The reason is the first line `bd` printed to stderr. Run the same `bd` command by hand.
+- **The band stays on `fathom starting…`** (`[fathom] starting…` in the Desktop app). Either Fathom hasn't created its issue yet, no issue matches the ref you typed, or you ran `scaffold`. Run `bd list --type epic --all` in the project and look for the issue ref in the epic's external ref.
+- **`fathom unavailable: …`** (with brackets in the Desktop app). The reason is the first line `bd` printed to stderr. Run the same `bd` command by hand.
 - **You hid it.** Run `/fathom-progress` once more.
 
 ### Team Organization Accounts
@@ -337,9 +342,11 @@ Running `claude -p "..." --debug-file f` with a prompt that starts a Fathom skil
 
 ### Design Source
 
-The band follows frames in the Claude Mods Figma file (file key `oG40tY6cPL2NzsJiZQ2gwg`): A1 Planned (`9:274`), A2 Executing (`9:289`) and A3 Done (`9:314`). The first drafts, including the per-task pills, are in section `11:77`. The frames don't include a creating or starting state, so those two are placeholders (`claude-mods-fathom-5l2.7`).
+The terminal band follows the States section of the Claude Mods Figma file (file key `oG40tY6cPL2NzsJiZQ2gwg`, node `59:791`): planned, executing, finished and creating, each in a terminal frame. The file's Band component (`56:220`) adds the starting, unavailable, between-tasks, nine-task and narrow variants, and the terminal follows those too. A few notes in the component are out of date. Its text still describes marks inside the bar and a 45-cell bar at 78 columns, and the frames no longer show either.
 
-`desktop.ts` takes its colors from the "Claude Code theme" collection in that file (Dark mode). I checked success, claude and subtle against what a terminal renders for the dark theme, and each is within two of the Figma value. The yellow for in progress is the collection's `warning`, and I haven't compared it to a terminal render.
+The Desktop band still follows the earlier frames: A1 Planned (`9:274`), A2 Executing (`9:289`) and A3 Done (`9:314`). The first drafts, including the per-task pills, are in section `11:77`. Those frames have no creating or starting state, so the Desktop's two are placeholders (`claude-mods-fathom-5l2.7`).
+
+`desktop.ts` takes its colors from the "Claude Code theme" collection in that file (Dark mode). I checked success, claude and subtle against what a terminal renders for the dark theme, and each is within two of the Figma value. The yellow for in progress is the collection's `warning`, and I haven't compared it to a terminal render. The terminal band uses theme keys, not those values. The design's dim text (`dimText`, `#8c8c8c`) isn't one of the engine's theme keys, so I read it as the `dimColor` the band already used for its second row. I haven't compared that to a terminal render either.
 
 ### Extending It
 
@@ -371,6 +378,6 @@ I have run `bd dolt push`. I haven't run `bd dolt pull` from a second clone.
 
 ## Status
 
-The terminal band, the Desktop's dark-theme SVG bar and the arming on a Team organization account have each been seen working: the first two in a scratch repository, the third in a work profile. The typed-ref and branch-fallback logic has unit tests and headless runs in a real repository, and I haven't yet watched it in a live session. I haven't seen the Desktop's non-dark bar, or the new arming signals in the Desktop app.
+The terminal band's three-row layout with the thin bar is new. Its unit and render tests pass, and the type-check and `claude plugin validate` are clean. I watched it in an interactive Claude Code session inside tmux, on a scratch repository, through the creating, executing (two tasks in review) and finished states at 100, 80 and 50 columns. The percent sat at the end of the bar's row with the `[-]` beside it, and the band needed no row of padding above the bar. That run drew the bar with `▂`. I then switched it to `━` with half-line gaps and saw the new bar come up after `/reload-plugins`, but I haven't compared it with the design's bar. tmux drew the colors from the 256-color palette, so I haven't seen the exact theme colors. At 22 columns the bar gives way to the count, and the label wraps onto a second line. Before that change, the terminal band, the Desktop's dark-theme SVG bar and the arming on a Team organization account had each been seen working: the first two in a scratch repository, the third in a work profile. The typed-ref and branch-fallback logic has unit tests and headless runs in a real repository, and I haven't yet watched it in a live session. I haven't seen the Desktop's non-dark bar, or the new arming signals in the Desktop app.
 
 The cmux row has been seen working in cmux's dark theme, for a full run, hiding and showing the band, `/clear`, the end of a session, a failed `bd` read, and with the workspace both selected and not. With two runs in one workspace, each pane keeps its pill, and a run that ends leaves a bar that is the other run's. If the run that ended owned the bar, the other run's bar is missing until that run's next change. I haven't seen it in a light theme or a remote workspace, and the Desktop app doesn't use it. I haven't verified that a finished run leaves an unread badge from cmux's own integration.
