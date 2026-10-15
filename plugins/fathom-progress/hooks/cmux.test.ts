@@ -1,0 +1,110 @@
+import { test, expect } from 'claude-code/testing'
+
+import type { RunTask, Snapshot, TaskState } from '../types'
+import { DARK } from './desktop'
+import { MAX_PILL_TEXT, NONE, PILL_KEY, clip, cmuxEntries, meterValue } from './cmux'
+
+function task(i: number, state: TaskState, isInReview = false): RunTask {
+  return { id: `t${i}`, ref: `SLU-${i}`, title: `Task ${i}`, state, isInReview }
+}
+
+// Five tasks: the first `done` closed, then one in progress (or next), the rest waiting.
+function executing(done: number, running: 'inProgress' | 'next' | null, reviews = 0): Snapshot {
+  const tasks: RunTask[] = []
+  for (let i = 0; i < 5; i++) {
+    if (i < done) tasks.push(task(i, 'done', i < reviews))
+    else if (i === done && running) tasks.push(task(i, running))
+    else tasks.push(task(i, 'waiting'))
+  }
+  return { kind: 'executing', ref: 'PHA-352', tasks }
+}
+
+test('idle puts nothing on the row', async () => {
+  expect(cmuxEntries({ kind: 'idle' })).toEqual(NONE)
+})
+
+test('starting is a pill and no bar', async () => {
+  const { pill, meter } = cmuxEntries({ kind: 'starting' })
+  expect(pill?.text).toBe('starting…')
+  expect(meter).toBeNull()
+})
+
+test('creating counts the tasks made so far, and has no bar since there is no total', async () => {
+  expect(cmuxEntries({ kind: 'creating', ref: 'SLU-1', created: 0 }).pill?.text).toBe('planning')
+  expect(cmuxEntries({ kind: 'creating', ref: 'SLU-1', created: 1 }).pill?.text).toBe('planning · 1 task')
+  expect(cmuxEntries({ kind: 'creating', ref: 'SLU-1', created: 3 }).pill?.text).toBe('planning · 3 tasks')
+  expect(cmuxEntries({ kind: 'creating', ref: 'SLU-1', created: 3 }).meter).toBeNull()
+})
+
+test('executing shows the count, the task in progress, and a bar of done over total', async () => {
+  const { pill, meter } = cmuxEntries(executing(2, 'inProgress'))
+  expect(pill?.text).toBe('2/5 · now 3')
+  expect(pill?.color).toBe(DARK.inProgress)
+  expect(meter).toEqual({ value: 0.4, label: 'PHA-352 · 2 of 5' })
+})
+
+test('between tasks the pill names the next one', async () => {
+  expect(cmuxEntries(executing(2, 'next')).pill?.text).toBe('2/5 · next 3')
+})
+
+test('with no task in progress or next, the pill only counts', async () => {
+  expect(cmuxEntries(executing(2, null)).pill?.text).toBe('2/5')
+})
+
+test('tasks in review are counted in the pill', async () => {
+  expect(cmuxEntries(executing(3, 'inProgress', 2)).pill?.text).toBe('3/5 · now 4 · 2 in review')
+})
+
+test('a bar that has not started is empty', async () => {
+  expect(cmuxEntries(executing(0, 'next')).meter).toEqual({ value: 0, label: 'PHA-352 · 0 of 5' })
+})
+
+test('finished is green with a full bar', async () => {
+  const tasks = [task(0, 'done'), task(1, 'done'), task(2, 'done')]
+  const { pill, meter } = cmuxEntries({ kind: 'finished', ref: 'PHA-352', tasks })
+  expect(pill).toEqual({ text: 'done 3/3', icon: 'checkmark.circle', color: DARK.done })
+  expect(meter).toEqual({ value: 1, label: 'PHA-352 · done' })
+})
+
+test('unavailable is a pill and no bar, and never carries the reason', async () => {
+  const { pill, meter } = cmuxEntries({ kind: 'unavailable', reason: 'bd exited 1: a very long reason that would be cut off by the row anyway' })
+  expect(pill?.text).toBe('bd unavailable')
+  expect(meter).toBeNull()
+})
+
+test('no pill is longer than the row takes, whatever the run', async () => {
+  const tasks = Array.from({ length: 12 }, (_, i) => task(i, i < 9 ? 'done' : i === 9 ? 'inProgress' : 'waiting', true))
+  const snapshots: Snapshot[] = [
+    { kind: 'starting' },
+    { kind: 'creating', ref: 'SLU-1', created: 120 },
+    { kind: 'executing', ref: 'ABCDEFGHIJ-1234', tasks },
+    { kind: 'finished', ref: 'ABCDEFGHIJ-1234', tasks },
+    { kind: 'unavailable', reason: 'x'.repeat(200) },
+  ]
+  for (const snapshot of snapshots) {
+    const text = cmuxEntries(snapshot).pill?.text ?? ''
+    expect(text.length).toBeLessThanOrEqual(MAX_PILL_TEXT)
+  }
+})
+
+test('clip leaves a short text alone and ends a long one with an ellipsis at the limit', async () => {
+  expect(clip('short')).toBe('short')
+  expect(clip('x'.repeat(MAX_PILL_TEXT))).toBe('x'.repeat(MAX_PILL_TEXT))
+  const cut = clip('x'.repeat(MAX_PILL_TEXT + 5))
+  expect(cut.length).toBe(MAX_PILL_TEXT)
+  expect(cut.endsWith('…')).toBe(true)
+})
+
+test('meterValue is what cmux set-progress takes: 0 to 1, two places', async () => {
+  expect(meterValue(0)).toBe('0')
+  expect(meterValue(0.4)).toBe('0.4')
+  expect(meterValue(2 / 3)).toBe('0.67')
+  expect(meterValue(1)).toBe('1')
+  expect(meterValue(-1)).toBe('0')
+  expect(meterValue(7)).toBe('1')
+})
+
+test('our pill key is not the one cmux uses for Claude Code', async () => {
+  expect(PILL_KEY).toBe('fathom')
+  expect(PILL_KEY).not.toBe('claude_code')
+})

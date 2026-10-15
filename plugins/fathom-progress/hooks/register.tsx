@@ -3,6 +3,8 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { Plan, Snapshot } from '../types'
 import { readBd } from './bd'
+import { NONE, PILL_KEY, cmuxEntries, meterValue } from './cmux'
+import type { CmuxEntries } from './cmux'
 import { paletteFor } from './desktop'
 import { drawBand } from './draw'
 import { POLL_MS, planPath, refsOfBranch, refsOfPrompt, startOf, startOfPrompt, touchesRun } from './lifecycle'
@@ -86,6 +88,69 @@ async function readTheme($: EngineInterface) {
   }
 }
 
+// The cmux sidebar row. Inside cmux the snapshot the band draws also goes onto the
+// workspace's row, as a status pill and a progress bar, through cmux's own command line.
+// Outside cmux (the desktop app, any other terminal) there is no CMUX_WORKSPACE_ID and
+// nothing happens. All of it is best effort: a cmux that is missing, stopped or slow must
+// never touch the band.
+const CMUX_TIMEOUT_MS = 3000
+
+// What the row last got, as the text it was made from, so an unchanged snapshot (every
+// poll) sends nothing; and whether a bar of ours is on it. cmux has one bar per workspace,
+// so ours is cleared only when ours was set, never someone else's.
+let sentToCmux: string | null = null
+let hasMeterOnRow = false
+
+async function cmux($: EngineInterface, args: string[]): Promise<void> {
+  try {
+    const out = await $.process.run(['cmux', ...args], { timeoutMs: CMUX_TIMEOUT_MS })
+    if (out.exitCode !== 0) {
+      $.ui.log(`fathom-progress: cmux ${args[0]} exited ${out.exitCode}: ${out.stderr.trim().split('\n')[0] ?? ''}`, { to: 'debug' })
+    }
+  } catch (error) {
+    $.ui.log(`fathom-progress: cmux ${args[0]} failed: ${error instanceof Error ? error.message : String(error)}`, { to: 'debug' })
+  }
+}
+
+// Puts `entries` on the row, or takes ours off when there are none. `isForced` sends
+// even when nothing changed: session.start uses it to remove a pill that a session which
+// ended badly left behind.
+async function syncCmux($: EngineInterface, entries: CmuxEntries, isForced: boolean): Promise<void> {
+  if ((await $.env.get('CMUX_WORKSPACE_ID')) === undefined) return
+  const key = JSON.stringify(entries)
+  if (!isForced && key === sentToCmux) return
+  sentToCmux = key
+
+  const { pill, meter } = entries
+  if (pill) await cmux($, ['set-status', PILL_KEY, pill.text, '--icon', pill.icon, '--color', pill.color])
+  else await cmux($, ['clear-status', PILL_KEY])
+
+  if (meter) {
+    hasMeterOnRow = true
+    await cmux($, ['set-progress', meterValue(meter.value), '--label', meter.label])
+  } else if (hasMeterOnRow) {
+    hasMeterOnRow = false
+    await cmux($, ['clear-progress'])
+  }
+}
+
+// One send at a time, in the order asked: two overlapping ones could leave the older
+// pill on the row. Each reads the snapshot when its turn comes, so the last one wins.
+let cmuxQueue: Promise<void> = Promise.resolve()
+
+// The row follows the band: what the band shows, and nothing while it is hidden or idle.
+function publish($: EngineInterface, isForced = false): Promise<void> {
+  cmuxQueue = cmuxQueue.then(async () => {
+    try {
+      const entries = (await read($, isHidden)) ? NONE : cmuxEntries(await read($, snapshot))
+      await syncCmux($, entries, isForced)
+    } catch (error) {
+      $.ui.log(`fathom-progress: cmux sync failed: ${error instanceof Error ? error.message : String(error)}`, { to: 'debug' })
+    }
+  })
+  return cmuxQueue
+}
+
 // One refresh at a time. A call that arrives during one asks for another straight
 // after it, so the last change is never missed and the calls never pile up.
 let isRefreshing = false
@@ -106,7 +171,10 @@ async function refresh($: EngineInterface) {
       await readTheme($)
       const fresh = await build($, since, await read($, armedRefs))
       // A new invocation, or the session ending, during the fetch makes it stale.
-      if ((await read($, armedAt)) === since) await update($, snapshot, () => fresh)
+      if ((await read($, armedAt)) === since) {
+        await update($, snapshot, () => fresh)
+        void publish($)
+      }
     } while (isStale)
   } finally {
     isRefreshing = false
@@ -136,6 +204,7 @@ async function arm($: EngineInterface, start: 'execute' | 'scaffold' | null, via
   await update($, armedAt, () => (start === 'execute' ? now : null))
   await update($, armedRefs, () => [...refs])
   await update($, snapshot, () => ({ kind: 'starting' }))
+  void publish($)
   $.ui.log(`fathom-progress: armed (${start}) by ${via}, typed refs ${refs.join(',') || '-'}`, { to: 'debug' })
   if (start === 'execute') void refresh($)
 }
@@ -153,6 +222,11 @@ export const register: Register = on => {
       await $.command.register({ name: 'fathom-progress', description: 'Toggle the Fathom progress band.' })
     } catch {}
 
+    // Forced, to take off the row a pill that a session which ended badly left there, and to
+    // put the run back after /reload-plugins, which makes this module new and leaves the
+    // band's state as it was.
+    void publish($, true)
+
     return next(e)
   })
 
@@ -162,6 +236,8 @@ export const register: Register = on => {
     await update($, armedAt, () => null)
     await update($, armedRefs, () => [])
     await update($, snapshot, () => ({ kind: 'idle' }))
+    // Awaited: the session may be gone straight after, and the row must not keep the run.
+    await publish($)
     return next(e)
   })
 
@@ -200,6 +276,7 @@ export const register: Register = on => {
   on('command.run', { command: 'fathom-progress' }, async $ => {
     const current = await read($, isHidden)
     await update($, isHidden, () => !current)
+    void publish($)
     return { text: current ? 'Fathom band shown.' : 'Fathom band hidden.' }
   })
 
