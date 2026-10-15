@@ -131,11 +131,11 @@ The row gets a status pill (an icon and one line of text) and a progress bar wit
 
 The pill uses the band's colors: coral while Fathom is getting ready, yellow with a hammer icon while it works, green when it is done. The red is macOS's system red, because the Figma file has no failure state to take one from.
 
-The row follows the band. `/fathom-progress` hides it, and `/clear` and the end of the session clear it. The mod's pill has its own name (`fathom`), so cmux's own Claude Code pill stays on the row. The mod doesn't touch the workspace's checklist or description.
+The row follows the band. `/fathom-progress` hides it, and `/clear` and the end of the session clear it. The mod's pill has its own name (`fathom-` and the first eight characters of the pane's id), so cmux's own Claude Code pill stays on the row and each pane's run has a pill of its own. The mod doesn't touch the workspace's checklist or description.
 
 What I know about the limits:
 
-- **Two runs in one workspace.** cmux has one progress bar per workspace. If two panes of a workspace each run Fathom, the change that came last replaces the other run's pill and bar, and when one run ends it clears the row until the other run changes. I saw this with two sessions. It is tracked under `claude-mods-fathom-5l2.14.7`.
+- **Two runs in one workspace.** Each pane's run keeps its own pill, and ending one leaves the other's. cmux has one progress bar per workspace, so the run that changed last owns it. A run takes the bar off only while it still shows that run's reference, so a run that ends while the other owns the bar leaves it. A run that ends while it owns the bar clears it, and the other run's bar comes back at that run's next change, which can be a whole task. I saw both cases with two sessions. The pills look alike, since each shows only its own count.
 - **No notification.** The mod doesn't post a cmux notification (an unread badge). cmux's own Claude Code integration posts a "Completed in <folder>" notification, and the pill already shows the finish on a workspace you aren't looking at.
 - **What I have seen.** A full run, hiding and showing the band, `/clear` and the end of a session, with the workspace selected and not selected, in cmux's dark theme. I haven't seen a light theme or a remote workspace.
 
@@ -214,22 +214,24 @@ The module registers these hooks:
 
 | Entries | Command |
 |---|---|
-| a pill | `cmux set-status fathom <text> --icon <name> --color <hex>` |
-| no pill | `cmux clear-status fathom` |
+| a pill | `cmux set-status fathom-<pane> <text> --icon <name> --color <hex>` |
+| no pill | `cmux clear-status fathom-<pane>` |
 | a bar | `cmux set-progress <0 to 1> --label <text>` |
-| no bar, and the mod set one | `cmux clear-progress` |
+| no bar, and the mod set one | `cmux sidebar-state`, then `cmux clear-progress` if the bar's label still starts with this run's reference |
+
+`<pane>` is the first eight characters of `CMUX_SURFACE_ID`, which cmux gives each pane. `pillKeyFor` in `cmux.ts` builds the key, and `barLabelOn` and `isOurBar` read the bar.
 
 `publish` runs after each snapshot update, after `arm`, at `session.start` (forced), at `session.end` and when `/fathom-progress` toggles the band. The rules are in `syncCmux` and `publish`:
 
-- **Guard.** Nothing is sent unless `CMUX_WORKSPACE_ID` is set, which cmux sets in its own terminals. It is the only variable the mod reads, and `claude plugin validate` lists it.
+- **Guard.** Nothing is sent unless `CMUX_WORKSPACE_ID` is set, which cmux sets in its own terminals. The mod reads one more, `CMUX_SURFACE_ID`, for the pill's key. `claude plugin validate` lists both.
 - **Only changes.** The entries are compared with what was last sent, so the 10-second poll sends nothing while the run is unchanged.
 - **One at a time.** Sends go through a promise queue, and each reads the snapshot when its turn comes, so the last one wins.
 - **Best effort.** Each call has a 3-second timeout. A failure goes to the debug channel and never reaches the band.
-- **Its own key.** cmux's Claude Code integration owns the `claude_code` pill. The mod's key is `fathom`.
-- **Clears only its own.** `clear-progress` runs only if the mod set a bar, because another tool may own the workspace's one bar. `session.start` sends a forced clear, to remove a pill that a session left when it ended badly and to put the run back after `/reload-plugins`.
+- **Its own key.** cmux's Claude Code integration owns the `claude_code` pill. The mod's key is `fathom-<pane>`, so two runs in a workspace each have a pill and each clears only its own. Without an id the key is `fathom`.
+- **Clears only its own.** `clear-progress` runs only if the mod set a bar and `cmux sidebar-state` shows a bar whose label still starts with this run's reference, because another run may have taken the workspace's one bar. If cmux can't answer, the mod clears it. `session.start` sends a forced clear, to remove a pill that a session left when it ended badly and to put the run back after `/reload-plugins`.
 - **Leaves alone** the workspace checklist and the `workspace status set` lane, which cmux's documentation reserves for the user, and the description, which is the user's text.
 
-The sending is in `register.tsx`, so it has no unit tests, for the reason in the next section. I checked it live: run a Fathom issue in a scratch Beads repository inside cmux, and read the row with `cmux list-status` (the pill) and `cmux sidebar-state` (the bar). To count the calls a session makes, put a script named `cmux` first on `PATH` that appends its arguments to a file. With `CMUX_WORKSPACE_ID` unset it recorded none, and with it set the same session recorded three.
+The sending is in `register.tsx`, so it has no unit tests, for the reason in the next section. I checked it live: run a Fathom issue in a scratch Beads repository inside cmux, and read the row with `cmux list-status` (the pill) and `cmux sidebar-state` (the bar). To count the calls a session makes, put a script named `cmux` first on `PATH` that appends its arguments to a file. With `CMUX_WORKSPACE_ID` unset it recorded none, and with it set the same session recorded three. For two panes I ran two sessions in one workspace, the second with its own `CMUX_SURFACE_ID`, and read both pills and the bar while the runs changed and ended.
 
 ### Why the Code Is Split This Way
 
@@ -311,7 +313,7 @@ The band follows frames in the Claude Mods Figma file (file key `oG40tY6cPL2NzsJ
 - **More trackers' refs.** `REF` in `lifecycle.ts` reads refs shaped like `PHA-352` (letters, a hyphen, digits). Asana's numeric task ids aren't read.
 - **A ref from plain words.** The Skill tool's call event has no arguments, so a request in plain words can arm the band but can't name the issue. A prompt's text would have to be parsed for it.
 - **Continuing a run without a Fathom command.** `claude --continue` followed by ordinary prompts leaves the band idle, because nothing arms it.
-- **Two runs in one workspace.** The cmux row has one pill key and one bar, so two runs overwrite each other, and one ending clears the other's row. The likely fix is a pill key per pane (from `CMUX_SURFACE_ID`) and clearing the bar only while it still shows this run. The options are in `claude-mods-fathom-5l2.14.7`.
+- **Two runs in one workspace.** The pill is per pane and the bar is shared. A run that ends while the other owns the bar leaves it, and a run that ends while it owns the bar clears it, so the other run's bar returns only at that run's next change. Resending the bar on a slow timer would close that gap, at one cmux call per interval, against the goal that a poll sends nothing. The options are in `claude-mods-fathom-5l2.14.7`.
 - **A rounded bar on other Desktop themes.** `Box` has no corner radius and an `Svg` has fixed colors, so only the dark theme gets the rounded bar. Another theme needs its own palette in `desktop.ts` (`paletteFor` returns one only for `dark`).
 
 ### Issue Tracking
@@ -336,4 +338,4 @@ I have run `bd dolt push`. I haven't run `bd dolt pull` from a second clone.
 
 The terminal band, the Desktop's dark-theme SVG bar and the arming on a Team organization account have each been seen working: the first two in a scratch repository, the third in a work profile. The typed-ref and branch-fallback logic has unit tests and headless runs in a real repository, and I haven't yet watched it in a live session. I haven't seen the Desktop's non-dark bar, or the new arming signals in the Desktop app.
 
-The cmux row has been seen working in cmux's dark theme, for a full run, hiding and showing the band, `/clear`, the end of a session, a failed `bd` read, and with the workspace both selected and not. It has been seen going wrong when two runs share a workspace. I haven't seen it in a light theme or a remote workspace, and the Desktop app doesn't use it. I haven't verified that a finished run leaves an unread badge from cmux's own integration.
+The cmux row has been seen working in cmux's dark theme, for a full run, hiding and showing the band, `/clear`, the end of a session, a failed `bd` read, and with the workspace both selected and not. With two runs in one workspace, each pane keeps its pill, and a run that ends leaves a bar that is the other run's. If the run that ended owned the bar, the other run's bar is missing until that run's next change. I haven't seen it in a light theme or a remote workspace, and the Desktop app doesn't use it. I haven't verified that a finished run leaves an unread badge from cmux's own integration.

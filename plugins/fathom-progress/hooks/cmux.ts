@@ -20,6 +20,16 @@ export const NONE: CmuxEntries = { pill: null, meter: null }
 // leaves it alone and lets us clear only ours.
 export const PILL_KEY = 'fathom'
 
+// The pill's key for one pane. Two Fathom runs in a workspace (two panes) share its row;
+// with one key the later run replaces the earlier one's pill and the first to end clears
+// both. cmux gives each terminal pane its own id (`CMUX_SURFACE_ID`, a UUID), so the first
+// eight characters of it make a key per pane, and a run clears only its own. Without an id
+// the plain key stands.
+export function pillKeyFor(surfaceId: string | undefined): string {
+  const short = (surfaceId ?? '').replace(/[^A-Za-z0-9]/g, '').slice(0, 8).toLowerCase()
+  return short === '' ? PILL_KEY : `${PILL_KEY}-${short}`
+}
+
 // About what fits on one line of the row at the default sidebar width: a 66-character pill
 // was cut after 32 (claude-mods-fathom-5l2.14.1).
 export const MAX_PILL_TEXT = 30
@@ -87,6 +97,24 @@ export function cmuxEntries(snapshot: Snapshot): CmuxEntries {
     case 'unavailable':
       return { pill: { text: 'bd unavailable', icon: ICON.failed, color: COLOR.failed }, meter: null }
   }
+}
+
+// The workspace has one bar, whoever set it, so a run takes its bar off only when it is
+// still its own. A bar's label starts with the run's reference (`PHA-352 · 2 of 5`), and
+// the row's `progress=` line in `cmux sidebar-state` is `<value> <label>`, or `none`.
+export function barLabelOn(sidebarState: string): string | null {
+  const line = sidebarState.split('\n').find(l => l.startsWith('progress='))
+  const text = line?.slice('progress='.length).trim() ?? 'none'
+  if (text === 'none') return null
+  return text.replace(/^\S+\s*/, '')
+}
+
+// Whether the bar on the row (its label, or null when there is none) is the one that
+// `ourLabel` put there: the same reference in front. Two runs of the same issue in one
+// workspace draw the same bar, so for them this is true of either.
+export function isOurBar(rowLabel: string | null, ourLabel: string): boolean {
+  const ref = ourLabel.split(' · ')[0] ?? ourLabel
+  return rowLabel !== null && rowLabel.startsWith(`${ref} · `)
 }
 
 // `cmux set-progress` takes 0.0 to 1.0.

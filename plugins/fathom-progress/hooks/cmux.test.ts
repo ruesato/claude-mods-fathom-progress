@@ -2,7 +2,7 @@ import { test, expect } from 'claude-code/testing'
 
 import type { RunTask, Snapshot, TaskState } from '../types'
 import { DARK } from './desktop'
-import { MAX_PILL_TEXT, NONE, PILL_KEY, clip, cmuxEntries, meterValue } from './cmux'
+import { MAX_PILL_TEXT, NONE, PILL_KEY, barLabelOn, clip, cmuxEntries, isOurBar, meterValue, pillKeyFor } from './cmux'
 
 function task(i: number, state: TaskState, isInReview = false): RunTask {
   return { id: `t${i}`, ref: `SLU-${i}`, title: `Task ${i}`, state, isInReview }
@@ -107,4 +107,38 @@ test('meterValue is what cmux set-progress takes: 0 to 1, two places', async () 
 test('our pill key is not the one cmux uses for Claude Code', async () => {
   expect(PILL_KEY).toBe('fathom')
   expect(PILL_KEY).not.toBe('claude_code')
+})
+
+test('each pane gets its own pill key, from the first eight characters of its surface id', async () => {
+  expect(pillKeyFor('025A8E08-1DFB-4109-9998-0D0F6A74FCB3')).toBe('fathom-025a8e08')
+  expect(pillKeyFor('7C1F0B22-AAAA-4000-8000-000000000001')).toBe('fathom-7c1f0b22')
+  expect(pillKeyFor('025A8E08-1DFB-4109-9998-0D0F6A74FCB3')).not.toBe(pillKeyFor('7C1F0B22-AAAA-4000-8000-000000000001'))
+})
+
+test('without a surface id the plain pill key stands, and no key is cmux\'s own', async () => {
+  expect(pillKeyFor(undefined)).toBe(PILL_KEY)
+  expect(pillKeyFor('')).toBe(PILL_KEY)
+  expect(pillKeyFor('--------')).toBe(PILL_KEY)
+  expect(pillKeyFor('025A8E08-1DFB')).not.toBe('claude_code')
+})
+
+test('the bar on the row is the label after the value in the progress line of sidebar-state', async () => {
+  const state = (progress: string) => `tab=FB598B8C\ncolor=none\nprogress=${progress}\nstatus_count=1\n  claude_code=Running`
+  expect(barLabelOn(state('0.40 PHA-352 · 2 of 5'))).toBe('PHA-352 · 2 of 5')
+  expect(barLabelOn(state('1.00 PHA-352 · done'))).toBe('PHA-352 · done')
+  expect(barLabelOn(state('0.40'))).toBe('')
+  expect(barLabelOn(state('none'))).toBeNull()
+  expect(barLabelOn('tab=FB598B8C\ncolor=none')).toBeNull()
+})
+
+test('a run takes its bar off only while the row still shows its reference', async () => {
+  expect(isOurBar('PHA-352 · 3 of 5', 'PHA-352 · 2 of 5')).toBe(true)
+  expect(isOurBar('PHA-352 · done', 'PHA-352 · 4 of 5')).toBe(true)
+  // Another run's bar, and a bar with no label: not ours.
+  expect(isOurBar('SLU-124 · 1 of 3', 'PHA-352 · 2 of 5')).toBe(false)
+  expect(isOurBar('', 'PHA-352 · 2 of 5')).toBe(false)
+  // Nothing on the row: nothing to clear.
+  expect(isOurBar(null, 'PHA-352 · 2 of 5')).toBe(false)
+  // A reference that only begins the same is not the same reference.
+  expect(isOurBar('PHA-3520 · 1 of 2', 'PHA-352 · 2 of 5')).toBe(false)
 })

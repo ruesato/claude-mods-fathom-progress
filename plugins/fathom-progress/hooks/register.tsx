@@ -3,7 +3,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { Plan, Snapshot } from '../types'
 import { readBd } from './bd'
-import { NONE, PILL_KEY, cmuxEntries, meterValue } from './cmux'
+import { NONE, barLabelOn, cmuxEntries, isOurBar, meterValue, pillKeyFor } from './cmux'
 import type { CmuxEntries } from './cmux'
 import { paletteFor } from './desktop'
 import { drawBand } from './draw'
@@ -96,19 +96,24 @@ async function readTheme($: EngineInterface) {
 const CMUX_TIMEOUT_MS = 3000
 
 // What the row last got, as the text it was made from, so an unchanged snapshot (every
-// poll) sends nothing; and whether a bar of ours is on it. cmux has one bar per workspace,
-// so ours is cleared only when ours was set, never someone else's.
+// poll) sends nothing; and the label of the bar we put on it, if any. cmux has one bar per
+// workspace, and another pane's run may take it over, so ours is cleared only while the
+// row still shows it, never someone else's.
 let sentToCmux: string | null = null
-let hasMeterOnRow = false
+let ownBar: string | null = null
 
-async function cmux($: EngineInterface, args: string[]): Promise<void> {
+// Runs one cmux command. Returns what it printed, or null when it did not work.
+async function cmux($: EngineInterface, args: string[]): Promise<string | null> {
   try {
     const out = await $.process.run(['cmux', ...args], { timeoutMs: CMUX_TIMEOUT_MS })
     if (out.exitCode !== 0) {
       $.ui.log(`fathom-progress: cmux ${args[0]} exited ${out.exitCode}: ${out.stderr.trim().split('\n')[0] ?? ''}`, { to: 'debug' })
+      return null
     }
+    return out.stdout
   } catch (error) {
     $.ui.log(`fathom-progress: cmux ${args[0]} failed: ${error instanceof Error ? error.message : String(error)}`, { to: 'debug' })
+    return null
   }
 }
 
@@ -121,16 +126,23 @@ async function syncCmux($: EngineInterface, entries: CmuxEntries, isForced: bool
   if (!isForced && key === sentToCmux) return
   sentToCmux = key
 
+  // A key for this pane, so a second run in the workspace has a pill of its own and ending
+  // one run leaves the other's.
+  const pillKey = pillKeyFor(await $.env.get('CMUX_SURFACE_ID'))
   const { pill, meter } = entries
-  if (pill) await cmux($, ['set-status', PILL_KEY, pill.text, '--icon', pill.icon, '--color', pill.color])
-  else await cmux($, ['clear-status', PILL_KEY])
+  if (pill) await cmux($, ['set-status', pillKey, pill.text, '--icon', pill.icon, '--color', pill.color])
+  else await cmux($, ['clear-status', pillKey])
 
   if (meter) {
-    hasMeterOnRow = true
+    ownBar = meter.label
     await cmux($, ['set-progress', meterValue(meter.value), '--label', meter.label])
-  } else if (hasMeterOnRow) {
-    hasMeterOnRow = false
-    await cmux($, ['clear-progress'])
+  } else if (ownBar !== null) {
+    const label = ownBar
+    ownBar = null
+    // The bar may be another run's by now: leave it. When cmux can't say, clear it, as the
+    // mod always did; a cmux that fails to answer is unlikely to take the clear either.
+    const row = await cmux($, ['sidebar-state'])
+    if (row === null || isOurBar(barLabelOn(row), label)) await cmux($, ['clear-progress'])
   }
 }
 
