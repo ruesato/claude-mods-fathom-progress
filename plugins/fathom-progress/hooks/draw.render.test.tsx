@@ -57,11 +57,11 @@ const EXECUTING: Snapshot = {
 const DONE: Snapshot = { kind: 'finished', ref: 'SLU-123', tasks: runOf(['done', 'done', 'done', 'done', 'done']) }
 
 // The terminal's bar: heavy lines, each segment but the last ending in a heavy half line,
-// which is the gap. Five tasks in 55 cells are eleven wide each, and three made so far fill
-// three of five slots.
+// which is the gap. At 80 columns the bar has 74 cells, of which 70 divide among five tasks:
+// fourteen wide each. Three made so far fill three of five slots of fourteen.
 const seg = (n: number, hasNext = true) => '━'.repeat(hasNext ? n - 1 : n) + (hasNext ? '╸' : '')
-const BAR_OF_FIVE = seg(11).repeat(4) + seg(11, false)
-const BAR_OF_THREE_SLOTS = seg(11) + seg(11) + seg(11, false)
+const BAR_OF_FIVE = seg(14).repeat(4) + seg(14, false)
+const BAR_OF_THREE_SLOTS = seg(14) + seg(14) + seg(14, false)
 
 type Node = string | { type?: string; props?: Record<string, unknown>; children?: readonly Node[] }
 
@@ -148,10 +148,10 @@ test('terminal executing: the bar in each state\'s color, 40%, the reviews open 
 
   expect(head).toBe(`${BAR_OF_FIVE}40%`)
   expect(barRuns(tree)).toEqual([
-    { text: seg(11), color: 'success' },
-    { text: seg(11), color: 'claude' },
-    { text: seg(11), color: 'warning' },
-    { text: seg(11) + seg(11, false), color: 'subtle' },
+    { text: seg(14), color: 'success' },
+    { text: seg(14), color: 'claude' },
+    { text: seg(14), color: 'warning' },
+    { text: seg(14) + seg(14, false), color: 'subtle' },
   ])
   expect(title).toBe('●SLU-123 Progress band· 1 in review')
   // The note is its own dim Text on the title row, and the line beneath no longer carries it.
@@ -273,19 +273,45 @@ test('a narrower terminal shortens the bar, and a row with no room for one shows
   expect(shorter.head.endsWith('40%')).toBe(true)
   await shorter.ui.unmount()
 
-  // 18 columns leave 11 cells, under the 12 a bar is worth.
-  const narrow = await show(EXECUTING, 'terminal', 18)
+  // 17 columns leave 11 cells, under the 12 a bar is worth.
+  const narrow = await show(EXECUTING, 'terminal', 17)
   expect(narrow.head).toContain('2 of 5')
   expect(narrow.head).not.toContain('━')
   expect(narrow.head.endsWith('40%')).toBe(true)
   await narrow.ui.unmount()
 
   // More tasks than cells does too.
-  const many: Snapshot = { kind: 'executing', ref: 'SLU-123', tasks: runOf(Array.from({ length: 60 }, () => 'waiting' as const)) }
+  const many: Snapshot = { kind: 'executing', ref: 'SLU-123', tasks: runOf(Array.from({ length: 80 }, () => 'waiting' as const)) }
   const crowded = await show(many, 'terminal', 80)
-  expect(crowded.head).toContain('0 of 60')
+  expect(crowded.head).toContain('0 of 80')
   expect(crowded.head).not.toContain('━')
   await crowded.ui.unmount()
+})
+
+// Whether any Box under a node sets `prop`: the head row is laid out by what its parts
+// measure, so the percent follows the bar and is not pushed to the end of the row.
+function anyBoxSets(node: unknown, prop: string): boolean {
+  const n = node as { type?: string; props?: Record<string, unknown>; children?: unknown[] } | string | null | undefined
+  if (!n || typeof n === 'string') return false
+  return (n.type === 'Box' && n.props?.[prop] !== undefined) || (n.children ?? []).some(child => anyBoxSets(child, prop))
+}
+
+test('a wide window stretches the bar to fill it, and the percent stays with the bar', async ($, on) => {
+  const { show } = band($, on)
+
+  // 150 columns leave 144 cells, of which 140 divide into five segments of 28. The two grey
+  // ones are one run of 56. There is no limit: 200 columns give segments of 38.
+  const wide = await show(EXECUTING, 'terminal', 150)
+  expect(barRuns(wide.tree).map(r => r.text.length)).toEqual([28, 28, 28, 56])
+  expect(wide.head.endsWith('40%')).toBe(true)
+  // Nothing in the row grows or aligns to push the percent to the end.
+  expect(anyBoxSets(wide.tree, 'flexGrow')).toBe(false)
+  expect(anyBoxSets(wide.tree, 'justifyContent')).toBe(false)
+  await wide.ui.unmount()
+
+  const wider = await show(EXECUTING, 'terminal', 200)
+  expect(barRuns(wider.tree).map(r => r.text.length)).toEqual([38, 38, 38, 76])
+  await wider.ui.unmount()
 })
 
 test('the line beneath is cut to the row, a cell in from the left', async ($, on) => {
@@ -306,11 +332,11 @@ test('nine tasks, the over-seven case, still draw a bar with every task in it', 
     ref: 'SLU-123',
     tasks: runOf(['done', 'done', 'done', 'inProgress', 'waiting', 'waiting', 'waiting', 'waiting', 'waiting']),
   }
-  // 55 cells, of which 54 divide into nine segments of six, with eight half lines between them.
+  // 74 cells, of which 72 divide into nine segments of eight, with eight half lines between them.
   // The three done are one run, the one in progress is a run, and the five waiting are a run.
   const terminal = await show(nine, 'terminal')
-  expect(barRuns(terminal.tree).map(r => [r.color, r.text.length])).toEqual([['success', 18], ['warning', 6], ['subtle', 30]])
-  expect([...terminal.head].filter(c => c === '━' || c === '╸')).toHaveLength(54)
+  expect(barRuns(terminal.tree).map(r => [r.color, r.text.length])).toEqual([['success', 24], ['warning', 8], ['subtle', 40]])
+  expect([...terminal.head].filter(c => c === '━' || c === '╸')).toHaveLength(72)
   expect([...terminal.head].filter(c => c === '╸')).toHaveLength(8)
   expect(terminal.head.endsWith('33%')).toBe(true)
   expect(terminal.line).toContain('now 4/9')

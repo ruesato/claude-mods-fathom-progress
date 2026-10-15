@@ -48,11 +48,11 @@ const INSET = 2
 const TOP_GAP = 1
 
 // The terminal's rows follow the States frame of the design (Figma 59:791): the bar on
-// a row of its own with the percent at the far end, then the dot, ref and label with the
-// reviews open, then the dim line.
+// a row of its own with the percent right after it, then the dot, ref and label with the
+// reviews open, then the dim line. The bar fills the row, as in the later frame (64:792):
+// it takes every cell the left padding, the gap and the percent leave. The engine's `[-]`
+// sits beyond `bodyColumns`, so the bar never grows into its space.
 //
-// The bar's width. The design's is 500px, which is 55 cells at 9px a cell.
-const BAR_CELLS = 55
 // The design's bar is 5px tall in a 19px row. A heavy horizontal line is the nearest a
 // cell draws that sits in the middle of its row, as the design's bar does, and neighbors
 // join without a seam.
@@ -62,13 +62,16 @@ const BAR_GLYPH = '━'
 // left edge of its cell to the middle. That leaves half a cell (about 4.5px) between
 // segments. The beads-status band gets about 1px with a 7/8 block, but those are full-height.
 const SEGMENT_EDGE = '╸'
-// The design's 8px of padding at either end of a row, as a cell.
+// The design's 8px of padding at the left of a row, as a cell. The bar's row has none on
+// the right: the percent ends a cell from the engine's `[-]`, as in the design.
 const PAD = 1
 // Below this many cells a bar says too little to be worth its row; the row falls back
 // to the count.
 const MIN_BAR_CELLS = 12
-// The padding at both ends, the gap between the bar and the percent, and the percent.
-const CHROME = PAD + 1 + PERCENT_COLS + PAD
+// The padding on the left, the gap between the bar and the percent, and the percent's
+// columns. The bar leaves all four free whatever the percent reads, so it does not change
+// width when the percent gains a digit.
+const CHROME = PAD + 1 + PERCENT_COLS
 // While the run is still being made there is no total to divide the bar by, so it is this
 // many equal slots and each task made fills one, from the left.
 const GROWING_SLOTS = 5
@@ -81,10 +84,11 @@ function cell(char: string, color?: string): Cell {
   return { char, color }
 }
 
-// How many cells the bar gets on a row `bodyColumns` wide. `bodyColumns` already
-// leaves out the engine's cells at the right end.
+// How many cells the bar gets on a row `bodyColumns` wide: all that the padding, the gap
+// and the percent leave, with no upper limit. `bodyColumns` already leaves out the
+// engine's cells at the right end.
 export function barWidth(bodyColumns: number): number {
-  return Math.min(BAR_CELLS, bodyColumns - CHROME)
+  return bodyColumns - CHROME
 }
 
 // The cells for `count` equal segments in `room` cells: the largest multiple of the
@@ -136,8 +140,8 @@ export function growingCells(created: number, cells: number): Cell[] {
   return Array.from({ length: shown }).flatMap((_, i) => segmentCells(slot, color, i < shown - 1))
 }
 
-// Runs of cells with one color become one Text, so a 55-cell bar is a handful of
-// elements, not 55.
+// Runs of cells with one color become one Text, so a bar of any width is a handful of
+// elements, not one for each cell.
 export function toSpans(cells: readonly Cell[]): Span[] {
   const spans: Span[] = []
   for (const c of cells) {
@@ -303,13 +307,15 @@ function reviewNote(tasks: readonly RunTask[]): string {
   return reviews > 0 ? `· ${reviews} in review` : ''
 }
 
-// The terminal's first row: the bar, then the percent bold at the far end of the row,
-// where the engine's `[-]` follows it. The row is a cell in from each side. The count
-// stands in for a bar that has no room.
+// The terminal's first row: the bar, then the percent in bold right after it. The row is
+// a cell in from the left, and the engine's `[-]` follows it past `bodyColumns`. The
+// percent is not pushed to the end of the row, so it stays with the bar: the bar is trimmed
+// to whole segments and may stop a few cells short of the end. The count stands in for a
+// bar that has no room.
 function drawTerminalHead(ui: Ui, head: { bar: Span[] | null; count: string; percent: string }) {
   const { Box, Text } = ui
   return (
-    <Box paddingX={PAD} columnGap={1}>
+    <Box paddingLeft={PAD} columnGap={1}>
       <Box flexShrink={0}>
         {head.bar ? (
           <Text wrap="truncate">
@@ -323,7 +329,7 @@ function drawTerminalHead(ui: Ui, head: { bar: Span[] | null; count: string; per
           <Text dimColor>{head.count}</Text>
         )}
       </Box>
-      <Box flexGrow={1} justifyContent="flex-end">
+      <Box flexShrink={0}>
         <Text bold>{head.percent}</Text>
       </Box>
     </Box>

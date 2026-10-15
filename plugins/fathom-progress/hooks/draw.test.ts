@@ -21,8 +21,9 @@ const five = (state: TaskState) => Array.from({ length: 5 }, () => task(state))
 const seg = (n: number, hasNext = true) => '━'.repeat(hasNext ? n - 1 : n) + (hasNext ? '╸' : '')
 const widthsOf = (text: string) => text.split('╸').map((part, i, parts) => part.length + (i < parts.length - 1 ? 1 : 0))
 
-// The terminal bar is 55 cells at most. Five tasks divide it into segments of eleven, and
-// there is no blank cell between them: each segment but the last ends in a half line.
+// These draw a bar 55 cells wide, the room a window 61 columns wide leaves. Five tasks
+// divide it into segments of eleven, and there is no blank cell between them: each segment
+// but the last ends in a half line.
 
 test('planned: five equal grey segments, each but the last ending in a half line, and nothing written in them', async () => {
   const cells = barCells([task('next'), task('waiting'), task('waiting'), task('waiting'), task('waiting')], 55)
@@ -139,12 +140,21 @@ test('toSpans folds runs of one color into one span, so the bar is a handful of 
   }
 })
 
-test('the bar takes what the row leaves after its padding, the gap and the percent, up to 55 cells', async () => {
-  expect(barWidth(80)).toBe(55)
-  expect(barWidth(62)).toBe(55)
-  expect(barWidth(61)).toBe(54)
-  expect(barWidth(30)).toBe(23)
-  expect(barWidth(7)).toBe(0)
+test('the bar takes what the row leaves after the left padding, the gap and the percent, with no upper limit', async () => {
+  expect(barWidth(61)).toBe(55)
+  expect(barWidth(80)).toBe(74)
+  expect(barWidth(100)).toBe(94)
+  expect(barWidth(200)).toBe(194)
+  expect(barWidth(30)).toBe(24)
+  expect(barWidth(6)).toBe(0)
+})
+
+test('a bar that fills a wide row is still equal segments, and the cells the division leaves over stay off its end', async () => {
+  // 194 cells for five tasks: 190 divide evenly, so the bar is four short of the row.
+  const cells = barCells(five('waiting'), barWidth(200))
+
+  expect(cells).toHaveLength(190)
+  expect(widthsOf(chars(cells))).toEqual([38, 38, 38, 38, 38])
 })
 
 test('lineText joins the lead, the title and the note with two spaces', async () => {

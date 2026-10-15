@@ -7,12 +7,12 @@ A mod is a plugin that changes Claude Code's own interface or behavior. Fathom i
 I built it with Claude Code. It works in the terminal and in the Claude Code Desktop app. Inside cmux, a terminal app, it also puts the run on the workspace's sidebar row.
 
 ```
- ━━━━━━━━━━╸━━━━━━━━━━╸━━━━━━━━━━╸━━━━━━━━━━╸━━━━━━━━━━━                       40%
+ ━━━━━━━━━━╸━━━━━━━━━━╸━━━━━━━━━━╸━━━━━━━━━━╸━━━━━━━━━━━ 40%
  ● PHA-352 Progress band · 1 in review
  ▸ now 3/5  Add the results toggle
 ```
 
-*A schematic of the terminal layout, not a screenshot. Each task is a segment of the bar, colored by its state, and the percent is at the right end of the bar's row.*
+*A schematic of the terminal layout, not a screenshot. Each task is a segment of the bar, colored by its state. The bar fills the width of the window, so it is longer in a wide terminal, and the percent follows it.*
 
 ## Setup
 
@@ -104,7 +104,7 @@ Asana's numeric task refs are not read yet, and a ref written in a plain-words r
 
 ### What the Band Shows
 
-In the terminal the first row is a bar with one segment per task, and the percent done at its right end. The second row is a status dot, the issue's ref and `Progress band`, followed by how many tasks are in review when any are. The third row names the task in progress, or the next one. The Desktop app keeps its earlier arrangement: the dot, ref, bar and percent on the first row, and the task on the second with the reviews open at the end of that row.
+In the terminal the first row is a bar with one segment per task, with the percent done right after it. The second row is a status dot, the issue's ref and `Progress band`, followed by how many tasks are in review when any are. The third row names the task in progress, or the next one. The Desktop app keeps its earlier arrangement: the dot, ref, bar and percent on the first row, and the task on the second with the reviews open at the end of that row.
 
 | State | Looks like | When |
 |---|---|---|
@@ -135,7 +135,7 @@ The segments are equal widths. Fathom doesn't record a size for each task yet.
 
 Both show the same run. They arrange and draw it differently.
 
-- **Terminal.** The band is three rows, as in the design: the bar and percent, then the dot, ref and label, then the task. The bar is a row of heavy line characters (`━`), up to 55 characters wide, so it is thin like the design's bar and sits in the middle of its row. It has no marks and no step count in it. The design leaves 2 pixels between segments, and no line character stops closer to the edge of a character than its middle. Each segment but the last therefore ends in a heavy half line (`╸`), which leaves half a character between segments, about 4.5 pixels at the width the design uses. I tried a quarter-height block (`▂`) first, and its gaps were a whole character wide. `beads-status` gets about 1 pixel with a seven-eighths block (`▉`), but its bar is a full row tall. The percent sits at the right end of the row, where the design puts it.
+- **Terminal.** The band is three rows, as in the design: the bar and percent, then the dot, ref and label, then the task. The bar is a row of heavy line characters (`━`), so it is thin like the design's bar and sits in the middle of its row. It fills the window: it takes every character the left margin, the gap and the percent leave, with no upper limit, and the percent follows it. The segments are equal widths, so the bar can stop up to a few characters short of the end of the row. It has no marks and no step count in it. The design leaves 2 pixels between segments, and no line character stops closer to the edge of a character than its middle. Each segment but the last therefore ends in a heavy half line (`╸`), which leaves half a character between segments, about 4.5 pixels at the width the design uses. I tried a quarter-height block (`▂`) first, and its gaps were a whole character wide. `beads-status` gets about 1 pixel with a seven-eighths block (`▉`), but its bar is a full row tall. The first version of the bar stopped at 55 characters, the width of the design's first frame, and the percent was pushed to the end of the row, far from it in a wide window. The design's later frame (`64:792`) lets the bar fill the row with the percent right after it, which is what the terminal draws now.
 - **Desktop app, dark theme.** The bar is a rounded image (a Scalable Vector Graphics image, SVG) with the count in a pill at the head of the fill. An SVG can't read theme colors, so its colors are fixed to the dark theme.
 - **Desktop app, any other theme.** The bar is drawn from colored boxes that follow the theme. I built and unit-tested this one but have not seen it in the app.
 
@@ -378,6 +378,6 @@ I have run `bd dolt push`. I haven't run `bd dolt pull` from a second clone.
 
 ## Status
 
-The terminal band's three-row layout with the thin bar is new. Its unit and render tests pass, and the type-check and `claude plugin validate` are clean. I watched it in an interactive Claude Code session inside tmux, on a scratch repository, through the creating, executing (two tasks in review) and finished states at 100, 80 and 50 columns. The percent sat at the end of the bar's row with the `[-]` beside it, and the band needed no row of padding above the bar. That run drew the bar with `▂`. I then switched it to `━` with half-line gaps and saw the new bar come up after `/reload-plugins`, but I haven't compared it with the design's bar. tmux drew the colors from the 256-color palette, so I haven't seen the exact theme colors. At 22 columns the bar gives way to the count, and the label wraps onto a second line. Before that change, the terminal band, the Desktop's dark-theme SVG bar and the arming on a Team organization account had each been seen working: the first two in a scratch repository, the third in a work profile. The typed-ref and branch-fallback logic has unit tests and headless runs in a real repository, and I haven't yet watched it in a live session. I haven't seen the Desktop's non-dark bar, or the new arming signals in the Desktop app.
+The terminal band's three-row layout with the thin bar is new. Its unit and render tests pass, and the type-check and `claude plugin validate` are clean. I watched it in an interactive Claude Code session inside tmux, on a scratch repository, through the creating, executing (two tasks in review) and finished states at 100, 80 and 50 columns. The `[-]` sat on the bar's row, and the band needed no row of padding above the bar. That run drew a 55-character bar with `▂`. After I let the bar fill the window, I read the row at 200, 150, 100, 80 and 60 columns: the bar grew with the window, the percent started one character after it each time, and six characters separated the percent from the `[-]`. I then switched it to `━` with half-line gaps and saw the new bar come up after `/reload-plugins`, but I haven't compared it with the design's bar. tmux drew the colors from the 256-color palette, so I haven't seen the exact theme colors. At 22 columns the bar gives way to the count, and the label wraps onto a second line. Before that change, the terminal band, the Desktop's dark-theme SVG bar and the arming on a Team organization account had each been seen working: the first two in a scratch repository, the third in a work profile. The typed-ref and branch-fallback logic has unit tests and headless runs in a real repository, and I haven't yet watched it in a live session. I haven't seen the Desktop's non-dark bar, or the new arming signals in the Desktop app.
 
 The cmux row has been seen working in cmux's dark theme, for a full run, hiding and showing the band, `/clear`, the end of a session, a failed `bd` read, and with the workspace both selected and not. With two runs in one workspace, each pane keeps its pill, and a run that ends leaves a bar that is the other run's. If the run that ended owned the bar, the other run's bar is missing until that run's next change. I haven't seen it in a light theme or a remote workspace, and the Desktop app doesn't use it. I haven't verified that a finished run leaves an unread badge from cmux's own integration.
