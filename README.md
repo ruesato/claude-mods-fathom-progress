@@ -24,6 +24,23 @@ I built it with Claude Code. It works in the terminal and in the Claude Code Des
 
 ### Install
 
+fathom-progress is a plugin, and this repository is its marketplace. Add the marketplace, then install the plugin.
+
+```sh
+claude plugin marketplace add ruesato/claude-mods-fathom-progress
+claude plugin install fathom-progress@claude-mods-fathom
+```
+
+In a session that is already running, run `/reload-plugins`. Otherwise it loads the next time you start Claude Code. I have installed it from a local copy of this repository. I have not yet installed it from GitHub.
+
+To update, run `claude plugin marketplace update claude-mods-fathom` and then `claude plugin update fathom-progress@claude-mods-fathom`. According to the Claude Code documentation, a copy installed from GitHub updates only when `version` in `plugin.json` changes.
+
+#### Loading a Folder Instead
+
+You can load the mod's folder without installing it. Do this to try it quickly, or when you use `beads-status` from a folder (see below).
+
+A mod loaded from a folder runs ahead of an installed one. `beads-status` draws above the prompt and never yields, so when it is loaded from a folder, an installed fathom-progress never gets the slot. I saw this: with fathom-progress installed and `beads-status` in `CLAUDE_CODE_PLUGIN_DIRS`, `beads-status` drew and the band did not, and with both in the variable and fathom-progress first, the band drew. If you load `beads-status` from a folder, load fathom-progress from a folder too.
+
 1. Clone this repository.
 
    ```sh
@@ -145,8 +162,8 @@ What I know about the limits:
 
 ### When It Doesn't Show
 
-- **Nothing appears after `/fathom:execute`.** Check that the session started after you saved the setting, then check the path. A session that was already running when you saved it doesn't load the mod.
-- **`beads-status` draws instead.** Move fathom-progress ahead of it in `CLAUDE_CODE_PLUGIN_DIRS`.
+- **Nothing appears after `/fathom:execute`.** Run `/plugin` and look for fathom-progress in the line that counts the active mods. If it isn't there, check that the session started after you installed it or saved the setting, then check the path. A session that was already running at that point doesn't load the mod.
+- **`beads-status` draws instead.** If you load both from folders, move fathom-progress ahead of it in `CLAUDE_CODE_PLUGIN_DIRS`. If fathom-progress is installed and `beads-status` is loaded from a folder, load fathom-progress from a folder too.
 - **The band stays on `[fathom] starting…`.** Either Fathom hasn't created its issue yet, no issue matches the ref you typed, or you ran `scaffold`. Run `bd list --type epic --all` in the project and look for the issue ref in the epic's external ref.
 - **`[fathom] unavailable: …`.** The reason is the first line `bd` printed to stderr. Run the same `bd` command by hand.
 - **You hid it.** Run `/fathom-progress` once more.
@@ -164,6 +181,7 @@ To see whether your account does this, run a Fathom skill with `claude -p "<prom
 ### Repository Layout
 
 ```
+.claude-plugin/marketplace.json the marketplace: lists plugins/fathom-progress
 plugins/fathom-progress/
   .claude-plugin/plugin.json    manifest: name, version, the types file
   types.d.ts                    RunTask, Snapshot, Plan and the mod's state
@@ -184,6 +202,21 @@ plugins/fathom-progress/
 scripts/seed-fathom-fixture.sh  drives a scratch Beads repo and writes fixtures.ts
 .beads/                         this project's own issue tracker
 ```
+
+### Working on the Mod
+
+Add your clone as a marketplace from its path, and install from it.
+
+```sh
+claude plugin marketplace add /path/to/claude-mods-fathom-progress
+claude plugin install fathom-progress@claude-mods-fathom
+```
+
+The plugin then loads in place from `plugins/fathom-progress`. According to the Claude Code documentation, your edits take effect at the next session start or `/reload-plugins`, and you don't change `version` while you work. `claude plugin list` shows where it reads from.
+
+Don't load that folder through `--plugin-dir` or `CLAUDE_CODE_PLUGIN_DIRS` in the session where Claude Code edits it. The documentation makes a folder loaded that way a protected path. In auto mode an edit to it goes to the classifier, which returned no verdict every time I tried, and an allow rule in settings can't change that. I saw the same edit refused in a session that loaded the folder and accepted in a session where the mod was installed. If you also run `beads-status` from a folder, see the note under Install.
+
+To release a version, raise `version` in `plugins/fathom-progress/.claude-plugin/plugin.json` and push. People who installed from GitHub get the new copy when the version changes.
 
 ### How a Run Becomes a Band
 

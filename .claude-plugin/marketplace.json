@@ -1,0 +1,14 @@
+{
+  "name": "claude-mods-fathom",
+  "description": "Claude Code mods for Fathom, by Ryan Uesato",
+  "owner": {
+    "name": "Ryan Uesato"
+  },
+  "plugins": [
+    {
+      "name": "fathom-progress",
+      "source": "./plugins/fathom-progress",
+      "description": "Shows Fathom progress above the prompt, in the terminal and the Claude Code Desktop app, and mirrors it on the cmux sidebar row."
+    }
+  ]
+}
