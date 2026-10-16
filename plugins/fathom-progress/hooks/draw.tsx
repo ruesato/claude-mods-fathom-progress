@@ -2,7 +2,7 @@ import type { EngineInterface } from 'claude-code'
 
 import type { RunTask, Snapshot } from '../types'
 import { allocate } from './bar'
-import { CELL_PX, PERCENT_CELLS, barSvg, desktopBarWidth, growingSvg } from './desktop'
+import { PERCENT_CELLS, PERCENT_GAP_PX, barSvg, desktopBarWidth, growingSvg } from './desktop'
 import type { Palette } from './desktop'
 import { currentOf, progressOf } from './state'
 
@@ -35,10 +35,12 @@ export function lookOf(task: Pick<RunTask, 'state' | 'isInReview'>) {
 }
 
 const DOT = '●'
-const LABEL_SUFFIX = ' Progress band'
+// What the desktop's label says after the ref: the design's frames all read `SLU-123
+// Progress band`. A long title would take the room the row needs, so it is not the issue's.
+const DESKTOP_TITLE = 'Progress band'
 // `100%`, right-aligned.
 const PERCENT_COLS = 4
-// Desktop: the dot and the gap after it, which the line under the bar leaves blank so
+// Desktop: the dot and the gap after it, which the line under the label leaves blank so
 // its text lines up with the label above.
 const INSET = 2
 // Desktop: the engine draws its `[-]` on the first row of the band, so a row of padding
@@ -158,7 +160,8 @@ export function toSpans(cells: readonly Cell[]): Span[] {
 // The desktop's bar for a theme that has no Svg palette: one Box per task, its background
 // a theme key and its width in cells, so it follows the theme and needs no block
 // characters, which do not line up in the desktop's proportional font. A cell is CELL_PX
-// there. There is no rounded corner or pill; the icons and the step text are the same.
+// there. A Box is a row tall and cannot round a corner, so this bar is not thin like the
+// Svg's, and it keeps the icons and the step text that tell its states apart.
 const DESKTOP_GAP = 1
 // While the tasks are made each takes this many cells of the bar.
 const GROW_CELLS = 4
@@ -220,8 +223,6 @@ function drawSegments(ui: Ui, segments: readonly DesktopSegment[]) {
 }
 
 type Head = {
-  dot: string
-  label: string
   // The desktop's bar, an Svg, which takes the bar's place when there is one.
   svg?: { source: string; alt: string; width: number; height: number } | null
   // The desktop's bar for a theme with no Svg palette, which takes it when there is one.
@@ -230,21 +231,18 @@ type Head = {
   percent: string
 }
 
-// The desktop's first row: a dot for the run's state, the label, the bar, and the percent.
-// The gaps between them are layout, not text, so each part can be found on its own.
+// The desktop's first row, as the design's: the bar, and the percent after it. The thin
+// Svg is centered on the percent's line. It carries the design's 12px before the percent
+// itself (a Box can only gap in cells), so the row adds none; the box bar and the count
+// have no such space, and get a cell. The gap is layout, not text, so each part can be
+// found on its own.
 function drawHead(ui: Ui, head: Head) {
   const { Box, Text } = ui
   // Only the desktop's element table has Svg.
   const Svg = 'Svg' in ui ? ui.Svg : null
   const hasSegments = !!head.segments && head.segments.length > 0
   return (
-    <Box columnGap={1}>
-      <Box flexShrink={0}>
-        <Text color={head.dot}>{DOT}</Text>
-      </Box>
-      <Box flexShrink={0}>
-        <Text>{head.label}</Text>
-      </Box>
+    <Box alignItems="center" columnGap={head.svg && Svg ? 0 : 1}>
       <Box flexShrink={0}>
         {head.svg && Svg ? (
           <Svg source={head.svg.source} alt={head.svg.alt} width={head.svg.width} height={head.svg.height} />
@@ -307,14 +305,18 @@ function percentText(percent: number): string {
   return `${percent}%`.padStart(PERCENT_COLS)
 }
 
+// The terminal's line starts with this arrow. The desktop's frames draw none, so the lines
+// below are built without it.
+const ARROW = '▸ '
+
 // The line under the bar names the task in progress, else the next one; with neither
 // (between two tasks) it only counts.
 function runLine(tasks: readonly RunTask[], done: number, total: number) {
   const current = currentOf(tasks)
   const task = current ? tasks[current.index] : undefined
   const lead = current
-    ? `▸ ${current.state === 'inProgress' ? 'now' : 'next'} ${current.index + 1}/${total}`
-    : `▸ ${done}/${total} done`
+    ? `${current.state === 'inProgress' ? 'now' : 'next'} ${current.index + 1}/${total}`
+    : `${done}/${total} done`
   return { lead, title: task?.title ?? '' }
 }
 
@@ -352,12 +354,13 @@ function drawTerminalHead(ui: Ui, head: { bar: Span[] | null; count: string; per
   )
 }
 
-// The second row: the dot for the run's state, the label, and the reviews open after
-// it in the dim color. `titleParts` has already cut both to the row.
-function drawTerminalTitle(ui: Ui, dot: string, { label, note }: { label: string; note: string }) {
+// The second row on both surfaces: the dot for the run's state, the label, and the reviews
+// open after it in the dim color. `titleParts` has already cut both to the row, which is
+// `paddingLeft` cells narrower: the terminal's is a cell in, the desktop's is flush.
+function drawTitle(ui: Ui, dot: string, { label, note }: { label: string; note: string }, paddingLeft: number) {
   const { Box, Text } = ui
   return (
-    <Box paddingLeft={PAD} columnGap={1}>
+    <Box paddingLeft={paddingLeft} columnGap={1}>
       <Box flexShrink={0}>
         <Text color={dot}>{DOT}</Text>
       </Box>
@@ -420,8 +423,8 @@ function drawTerminal(ui: Ui, bodyColumns: number, snapshot: Exclude<Snapshot, {
           count: `${made}`,
           percent: '0%',
         })}
-        {drawTerminalTitle(ui, 'claude', titleParts(snapshot.ref, '', '', titleColumns))}
-        {drawTerminalLine(ui, lineText('▸ planning', made === 0 ? 'no tasks yet' : `${made} task${made === 1 ? '' : 's'} so far`, '', lineColumns))}
+        {drawTitle(ui, 'claude', titleParts(snapshot.ref, '', '', titleColumns), PAD)}
+        {drawTerminalLine(ui, lineText(`${ARROW}planning`, made === 0 ? 'no tasks yet' : `${made} task${made === 1 ? '' : 's'} so far`, '', lineColumns))}
       </Box>
     )
   }
@@ -445,7 +448,7 @@ function drawTerminal(ui: Ui, bodyColumns: number, snapshot: Exclude<Snapshot, {
     return (
       <Box flexDirection="column">
         {head}
-        {drawTerminalTitle(ui, dot, titleParts(snapshot.ref, issueTitle, '', titleColumns))}
+        {drawTitle(ui, dot, titleParts(snapshot.ref, issueTitle, '', titleColumns), PAD)}
         {drawTerminalLine(ui, `✓ ${total}/${total} done`)}
       </Box>
     )
@@ -455,8 +458,8 @@ function drawTerminal(ui: Ui, bodyColumns: number, snapshot: Exclude<Snapshot, {
   return (
     <Box flexDirection="column">
       {head}
-      {drawTerminalTitle(ui, dot, titleParts(snapshot.ref, issueTitle, reviewNote(tasks), titleColumns))}
-      {drawTerminalLine(ui, lineText(lead, title, '', lineColumns))}
+      {drawTitle(ui, dot, titleParts(snapshot.ref, issueTitle, reviewNote(tasks), titleColumns), PAD)}
+      {drawTerminalLine(ui, lineText(`${ARROW}${lead}`, title, '', lineColumns))}
     </Box>
   )
 }
@@ -495,28 +498,27 @@ export function drawBand(
     )
   }
 
-  const label = `${snapshot.ref}${LABEL_SUFFIX}`
-
   const hasSvg = !!target.palette && 'Svg' in ui
-  // The cells the desktop's bar has, from the pixels the row leaves.
-  const desktopCells = Math.floor(desktopBarWidth(bodyColumns, label) / CELL_PX)
+  // The bar shares its row with the percent only. The Svg is what that row leaves, in
+  // pixels, and the box bar is the cells left after the percent's box and the cell
+  // between them.
+  const barPx = desktopBarWidth(bodyColumns)
+  const boxCells = bodyColumns - PERCENT_CELLS - 1
+  // What the label and the line beneath have: the row less the dot and its gap.
+  const lineColumns = bodyColumns - INSET
 
+  // The desktop's rows follow the Figma `Desktop` section (79:1402), which are the
+  // terminal's three: the bar and its percent, the dot and label with the reviews open,
+  // then the line, indented under the label.
   if (snapshot.kind === 'creating') {
     const made = snapshot.created
-    const svg = hasSvg && target.palette ? growingSvg(made, { palette: target.palette, width: desktopBarWidth(bodyColumns, label) }) : null
-    const segments = !svg ? growingSegments(made, desktopCells) : null
-    const head = drawHead(ui, {
-      dot: 'claude',
-      label,
-      svg,
-      segments,
-      count: `${made}`,
-      percent: ' '.repeat(PERCENT_COLS),
-    })
+    const svg = hasSvg && target.palette ? growingSvg(made, { palette: target.palette, width: barPx, trail: PERCENT_GAP_PX }) : null
+    const segments = !svg ? growingSegments(made, boxCells) : null
     return (
       <Box flexDirection="column" paddingTop={TOP_GAP}>
-        {head}
-        {drawLine(ui, lineText('▸ planning', made === 0 ? 'no tasks yet' : `${made} task${made === 1 ? '' : 's'} so far`, '', bodyColumns - INSET))}
+        {drawHead(ui, { svg, segments, count: `${made}`, percent: percentText(0) })}
+        {drawTitle(ui, 'claude', titleParts(snapshot.ref, DESKTOP_TITLE, '', lineColumns), 0)}
+        {drawLine(ui, lineText('planning', made === 0 ? 'no tasks yet' : `${made} task${made === 1 ? '' : 's'} so far`, '', lineColumns))}
       </Box>
     )
   }
@@ -530,13 +532,11 @@ export function drawBand(
 
   const svg =
     hasSvg && target.palette && tasks.length > 0
-      ? barSvg(tasks, { palette: target.palette, width: desktopBarWidth(bodyColumns, label) })
+      ? barSvg(tasks, { palette: target.palette, width: barPx, trail: PERCENT_GAP_PX })
       : null
 
-  const segments = !svg && tasks.length > 0 ? desktopSegments(tasks, desktopCells) : null
+  const segments = !svg && tasks.length > 0 ? desktopSegments(tasks, boxCells) : null
   const head = drawHead(ui, {
-    dot,
-    label,
     svg,
     segments,
     count: stepText(done, total),
@@ -547,16 +547,20 @@ export function drawBand(
     return (
       <Box flexDirection="column" paddingTop={TOP_GAP}>
         {head}
+        {drawTitle(ui, dot, titleParts(snapshot.ref, DESKTOP_TITLE, '', lineColumns), 0)}
         {drawLine(ui, `✓ ${total}/${total} done`)}
       </Box>
     )
   }
 
+  // The reviews open follow the label, as the design's Row component has them, since a bar
+  // with no marks says "in review" by its color alone.
   const { lead, title } = runLine(tasks, done, total)
   return (
     <Box flexDirection="column" paddingTop={TOP_GAP}>
       {head}
-      {drawLine(ui, lineText(lead, title, reviewNote(tasks), bodyColumns - INSET))}
+      {drawTitle(ui, dot, titleParts(snapshot.ref, DESKTOP_TITLE, reviewNote(tasks), lineColumns), 0)}
+      {drawLine(ui, lineText(lead, title, '', lineColumns))}
     </Box>
   )
 }

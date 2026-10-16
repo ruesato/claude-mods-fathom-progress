@@ -97,17 +97,26 @@ test('any number of tasks fits: the segments share the width, the gaps give way 
   expect(none.alt).toBe('0 of 0 tasks done')
 })
 
-test('the bar fills what the row has left: the cells at 7.9px less the dot, three gaps, the label and the percent box', async () => {
-  const label = 'SLU-131 Progress band'
-
+test('the bar fills what its row has left: the cells at 7.9px less the percent box and the 12px before it', async () => {
   // Measured in the app: 95 cells across a 752px card.
-  expect(desktopBarWidth(95, label)).toBe(530)
-  expect(desktopBarWidth(80, label)).toBe(412)
-  // A longer label leaves less, by 6.8px for each character.
-  expect(desktopBarWidth(95, `${label}12345`)).toBe(496)
+  expect(desktopBarWidth(95)).toBe(699)
+  expect(desktopBarWidth(80)).toBe(580)
+  // Each column more is 7.9px more, all of it the bar's: the dot and the label are on the next row.
+  expect(desktopBarWidth(96)).toBe(706)
   // Never below a bar worth drawing, nor past what an Svg should be.
-  expect(desktopBarWidth(20, label)).toBe(120)
-  expect(desktopBarWidth(2000, label)).toBe(1200)
+  expect(desktopBarWidth(20)).toBe(120)
+  expect(desktopBarWidth(2000)).toBe(1200)
+})
+
+test('a trail is empty space after the bar that the Svg\'s box includes, so the row needs no gap of its own', async () => {
+  const bare = barSvg(EXECUTING, { palette: DARK, width: 530 })
+  const trailed = barSvg(EXECUTING, { palette: DARK, width: 530, trail: 12 })
+
+  expect([bare.width, trailed.width]).toEqual([530, 542])
+  expect(trailed.source).toContain('width="542" height="6" viewBox="0 0 542 6"')
+  // The segments are where they were: the bar is still 530 wide, and the trail holds none.
+  expect(segments(trailed.source)).toEqual(segments(bare.source))
+  expect(growingSvg(3, { palette: DARK, width: 530, trail: 12 }).width).toBe(542)
 })
 
 test('barSvg draws at the width it is given, the segments dividing that width', async () => {

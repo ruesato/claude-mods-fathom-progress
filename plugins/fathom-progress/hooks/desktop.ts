@@ -50,22 +50,19 @@ const SEGMENT_GAP = 3
 // 752px card, and its first ten cells were 79px, so a cell is 7.9px. It holds at the app's
 // default font size.
 export const CELL_PX = 7.9
-// The dot's box, and what a character of the label takes in the proportional font: 6.3
-// measured, 6.8 here so a long ref cannot push the percent onto a row of its own.
-const DOT_PX = 14
-const LABEL_PX_PER_CHAR = 6.8
 // The percent's box on the desktop, in cells: `100%` in bold takes 33px of its 39.5.
 export const PERCENT_CELLS = 5
-// The gaps of a row of four boxes with a column gap of one cell.
-const GAPS = 3
+// The design puts 12px between the bar and the percent. A Box can only gap in whole cells
+// (7.9px), so the Svg carries the space itself: see `trail` below.
+export const PERCENT_GAP_PX = 12
 const MIN_BAR_WIDTH = 120
 const MAX_BAR_WIDTH = 1200
 
-// The width of the bar that fills the rest of the row after the dot, the label, the percent
-// and the gaps, in CSS pixels. A few pixels are left over at the end, never a row too wide.
-export function desktopBarWidth(bodyColumns: number, label: string): number {
-  const room =
-    bodyColumns * CELL_PX - DOT_PX - GAPS * CELL_PX - label.length * LABEL_PX_PER_CHAR - PERCENT_CELLS * CELL_PX
+// The width of the bar that fills its row after the percent and the space before it, in
+// CSS pixels. The bar has a row of its own, so the dot and the label take none of it. A few
+// pixels are left over at the end, never a row too wide.
+export function desktopBarWidth(bodyColumns: number): number {
+  const room = bodyColumns * CELL_PX - PERCENT_CELLS * CELL_PX - PERCENT_GAP_PX
   return Math.max(MIN_BAR_WIDTH, Math.min(MAX_BAR_WIDTH, Math.floor(Math.round(room * 100) / 100)))
 }
 
@@ -89,9 +86,12 @@ function gapOf(width: number, count: number): number {
 // no ticks, pill or count. The segments are equal widths until Fathom records sizes, as in
 // the terminal bar; the one line to change then is where `seg` is worked out. A segment
 // narrower than its height gets a corner that fits, since Svg limits `rx` to half the width.
+//
+// `width` is the bar's. `trail` is empty space after it that the Svg's own size includes,
+// so the returned width is `width + trail`.
 export function barSvg(
   tasks: readonly RunTask[],
-  { palette, width = BAR_WIDTH, alt: altText }: { palette: Palette; width?: number; alt?: string },
+  { palette, width = BAR_WIDTH, trail = 0, alt: altText }: { palette: Palette; width?: number; trail?: number; alt?: string },
 ): { source: string; alt: string; width: number; height: number } {
   const count = tasks.length
   const gap = gapOf(width, count)
@@ -101,7 +101,8 @@ export function barSvg(
   const running = tasks.findIndex(t => t.state === 'inProgress')
 
   const out: string[] = []
-  out.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${n(width)}" height="${BAR_HEIGHT}" viewBox="0 0 ${n(width)} ${BAR_HEIGHT}">`)
+  const boxWidth = width + trail
+  out.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${n(boxWidth)}" height="${BAR_HEIGHT}" viewBox="0 0 ${n(boxWidth)} ${BAR_HEIGHT}">`)
   tasks.forEach((task, i) => {
     out.push(
       `<rect class="segment" x="${n(i * (seg + gap))}" width="${n(seg)}" height="${BAR_HEIGHT}" rx="${BAR_HEIGHT / 2}" fill="${fillOf(task, palette)}"/>`,
@@ -114,14 +115,14 @@ export function barSvg(
     `${done} of ${total} tasks done` +
       (reviews > 0 ? `, ${reviews} in review` : '') +
       (running !== -1 ? `, task ${running + 1} in progress` : '')
-  return { source: out.join(''), alt, width, height: BAR_HEIGHT }
+  return { source: out.join(''), alt, width: boxWidth, height: BAR_HEIGHT }
 }
 
 // The bar while the run's tasks are made: one waiting segment for each task made so far,
 // sharing the whole width, as the design's Creating frame draws it. There is no total yet,
 // so the segments re-divide as each task is made; with none made the bar is empty.
-export function growingSvg(made: number, { palette, width }: { palette: Palette; width: number }) {
+export function growingSvg(made: number, { palette, width, trail }: { palette: Palette; width: number; trail?: number }) {
   const tasks: RunTask[] = Array.from({ length: Math.max(0, made) }, (_, i) => ({ id: `made-${i}`, ref: null, title: '', state: 'waiting', isInReview: false }))
   const alt = made === 0 ? 'no tasks made yet' : `${made} task${made === 1 ? '' : 's'} made so far`
-  return barSvg(tasks, { palette, width, alt })
+  return barSvg(tasks, { palette, width, trail, alt })
 }

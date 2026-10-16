@@ -103,9 +103,8 @@ function band($: Engine, on: On) {
     return tree ?? next(e)
   })
 
-  // Mounts the band on `surface` and reads its rows. The terminal's are the bar with the
-  // percent, the title row, and the line beneath; the desktop's are the head row, which
-  // holds the title, and the line beneath it. `title` is empty on the desktop.
+  // Mounts the band on `surface` and reads its rows. Both surfaces draw three: the bar with
+  // the percent, the title row (the dot, the label and the reviews open), and the line beneath.
   return {
     wasNull: () => isNull,
     async show(snapshot: Snapshot, surface: Surface, bodyColumns = 80, withPalette: Palette | null = null) {
@@ -123,8 +122,7 @@ function band($: Engine, on: On) {
         const node = tree?.children?.[i]
         return node === undefined ? '' : textOf(node)
       }
-      const isTerminal = surface === 'terminal'
-      return { ui, head: row(0), title: isTerminal ? row(1) : '', line: row(isTerminal ? 2 : 1), tree }
+      return { ui, head: row(0), title: row(1), line: row(2), tree }
     },
   }
 }
@@ -227,13 +225,14 @@ test('terminal creating: the tasks made so far fill slots of the bar, 0% where t
   await one.ui.unmount()
 })
 
-test('desktop creating shows the tasks made so far with no total and no percent', async ($, on) => {
+test('desktop creating shows the tasks made so far, 0% where the percent goes, and no total', async ($, on) => {
   const { show } = band($, on)
-  const { ui, head, line } = await show({ kind: 'creating', ref: 'SLU-123', created: 3 }, 'desktop')
+  const { ui, head, title, line } = await show({ kind: 'creating', ref: 'SLU-123', created: 3 }, 'desktop')
 
-  expect(head.startsWith('●SLU-123 Progress band')).toBe(true)
-  expect(head).not.toContain('%')
-  expect(line).toBe('▸ planning  3 tasks so far')
+  expect(head.endsWith('0%')).toBe(true)
+  expect(title).toBe('●SLU-123 Progress band')
+  // The design's Creating frame has no arrow before the line, as the terminal's does.
+  expect(line).toBe('planning  3 tasks so far')
   await ui.unmount()
 })
 
@@ -308,9 +307,9 @@ test('the second row is the ref and the issue\'s title, with the reviews open af
   expect(await wide.ui.find({ type: 'Text', text: '· 1 in review' })).toBeDefined()
   await wide.ui.unmount()
 
-  // The desktop's band keeps its own label.
+  // The desktop's band keeps its own label, with the reviews open after it as well.
   const desktop = await show(home, 'desktop', 100)
-  expect(desktop.head.startsWith('●PHA-368 Progress band')).toBe(true)
+  expect(desktop.title).toBe('●PHA-368 Progress band· 1 in review')
   await desktop.ui.unmount()
 })
 
@@ -400,24 +399,27 @@ test('nine tasks, the over-seven case, still draw a bar with every task in it', 
   expect(terminal.line).toContain('now 4/9')
   await terminal.ui.unmount()
 
-  // On the desktop the nine segments are too narrow for `3 of 9`; each task still has its
-  // own segment and its icon, and the line beneath and the percent carry the count.
+  // On the desktop the bar has a row of its own with the percent, so the theme-following
+  // boxes are seven cells each: every task has its own box and icon, and the last has room
+  // for the step text.
   const desktop = await show(nine, 'desktop')
   expect(filledBoxes(desktop.tree)).toHaveLength(9)
+  expect(new Set(filledBoxes(desktop.tree).map(b => b.width))).toEqual(new Set([7]))
   expect([...desktop.head].filter(c => c === '✓')).toHaveLength(3)
+  expect(desktop.head).toContain('3 of 9')
   expect(desktop.head).not.toContain('━')
   expect(desktop.line).toContain('now 4/9')
   await desktop.ui.unmount()
 })
 
-test('desktop planned, executing and done keep the head row, the bar with its step text, and the note on the line beneath', async ($, on) => {
+test('desktop planned, executing and done draw three rows: the bar with its percent, the label with the reviews open, and the line beneath', async ($, on) => {
   const { show } = band($, on)
 
   const planned = await show(PLANNED, 'desktop')
-  expect(planned.head.startsWith('●SLU-123 Progress band')).toBe(true)
   expect(planned.head).toContain('0 of 5')
   expect(planned.head.endsWith('  0%')).toBe(true)
-  expect(planned.line).toBe('▸ next 1/5  Draft the plan doc')
+  expect(planned.title).toBe('●SLU-123 Progress band')
+  expect(planned.line).toBe('next 1/5  Draft the plan doc')
   await planned.ui.unmount()
 
   const executing = await show(EXECUTING, 'desktop')
@@ -425,33 +427,43 @@ test('desktop planned, executing and done keep the head row, the bar with its st
   expect(executing.head).toContain('◐')
   expect(executing.head).toContain('●')
   expect(executing.head.endsWith(' 40%')).toBe(true)
-  expect(executing.line).toBe('▸ now 3/5  Wire the lifecycle hooks  · 1 in review')
+  expect(executing.title).toBe('●SLU-123 Progress band· 1 in review')
+  expect(executing.line).toBe('now 3/5  Wire the lifecycle hooks')
   await executing.ui.unmount()
 
   const done = await show(DONE, 'desktop')
   expect(done.head).toContain('5 of 5')
   expect(done.head.endsWith('100%')).toBe(true)
+  expect(done.title).toBe('●SLU-123 Progress band')
   expect(done.line).toBe('✓ 5/5 done')
   await done.ui.unmount()
 })
 
 test('on the desktop, with a palette for the theme, the bar is one Svg of thin segments, and the step text is not drawn beside it', async ($, on) => {
   const { show } = band($, on)
-  const { ui, head, line } = await show(EXECUTING, 'desktop', 80, DARK)
+  const { ui, head, title, line, tree } = await show(EXECUTING, 'desktop', 80, DARK)
 
   const svg = (await ui.find({ type: 'Svg' })) as unknown as { props?: { alt?: string; width?: number; height?: number; source?: string } } | undefined
   expect(svg).toBeDefined()
   expect(svg?.props?.alt).toBe('2 of 5 tasks done, 1 in review, task 3 in progress')
-  // 80 cells at 7.9px, less the dot, three gaps, the label's 21 characters and the percent's box.
-  expect([svg?.props?.width, svg?.props?.height]).toEqual([412, 6])
-  // A segment for each of the five tasks, and no count drawn inside the bar.
+  // 80 cells at 7.9px, less the percent's box and the 12px before it, leaves a bar of 580;
+  // the Svg's own box carries those 12px after it.
+  expect([svg?.props?.width, svg?.props?.height]).toEqual([592, 6])
+  expect(svg?.props?.source).toContain('viewBox="0 0 592 6"')
+  // A segment for each of the five tasks, the last ending where the bar does, and no count
+  // drawn inside the bar.
   expect(svg?.props?.source?.match(/class="segment"/g)).toHaveLength(5)
+  const last = [...(svg?.props?.source ?? '').matchAll(/class="segment" x="([\d.]+)" width="([\d.]+)"/g)].at(-1)
+  expect(Math.abs(Number(last?.[1]) + Number(last?.[2]) - 580)).toBeLessThan(0.05)
   expect(svg?.props?.source).not.toContain('<text')
-  // The label, percent and line stay Text, so they follow the theme.
-  expect(head.startsWith('●SLU-123 Progress band')).toBe(true)
-  expect(head.endsWith(' 40%')).toBe(true)
+  // The thin bar sits in the middle of the percent's line.
+  const headRow = tree?.children?.[0] as { props?: Record<string, unknown> } | undefined
+  expect(headRow?.props?.alignItems).toBe('center')
+  // The percent, label and line stay Text, so they follow the theme; the bar row holds only the percent.
+  expect(head).toBe(' 40%')
+  expect(title).toBe('●SLU-123 Progress band· 1 in review')
   expect(head).not.toContain('━')
-  expect(line).toBe('▸ now 3/5  Wire the lifecycle hooks  · 1 in review')
+  expect(line).toBe('now 3/5  Wire the lifecycle hooks')
   await ui.unmount()
 })
 
@@ -487,8 +499,9 @@ test('the desktop Svg bar draws for planned and finished runs too, and while the
   const creating = await show({ kind: 'creating', ref: 'SLU-123', created: 3 }, 'desktop', 80, DARK)
   const svg = (await creating.ui.find({ type: 'Svg' })) as unknown as { props?: { alt?: string; width?: number; source?: string } } | undefined
   expect(svg?.props?.alt).toBe('3 tasks made so far')
-  // The three made share the whole width the row leaves, as the design's Creating frame does.
-  expect(svg?.props?.width).toBe(412)
+  // The three made share the whole bar the row leaves, as the design's Creating frame does:
+  // 580 and the 12px after it.
+  expect(svg?.props?.width).toBe(592)
   expect(svg?.props?.source?.match(/class="segment"/g)).toHaveLength(3)
   expect(svg?.props?.source).not.toContain('<text')
   expect(creating.head).not.toContain('━')
