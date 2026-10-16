@@ -104,7 +104,7 @@ Asana's numeric task refs are not read yet, and a ref written in a plain-words r
 
 ### What the Band Shows
 
-In the terminal the first row is a bar with one segment per task, with the percent done right after it. The second row is a status dot, the issue's ref and its title (`PHA-368 Home page: Restrict actions and CTAs, add video`), followed by how many tasks are in review when any are. The third row names the task in progress, or the next one. The Desktop app keeps its earlier arrangement: the dot, ref, bar and percent on the first row, and the task on the second with the reviews open at the end of that row. The Desktop still writes `Progress band` after the ref, because a long title would take the room its bar needs, and I haven't designed that yet.
+In the terminal the first row is a bar with one segment per task, with the percent done right after it. The second row is a status dot, the issue's ref and its title (`PHA-368 Home page: Restrict actions and CTAs, add video`), followed by how many tasks are in review when any are. The third row names the task in progress, or the next one. The Desktop app has the same three rows. It writes `Progress band` after the ref instead of the title, because that is what the design's frames read, and I haven't designed a title for it.
 
 | State | Looks like | When |
 |---|---|---|
@@ -114,20 +114,21 @@ In the terminal the first row is a bar with one segment per task, with the perce
 | Finished | A green bar and `✓ 5/5 done` | Every task is closed. |
 | Unavailable | `fathom unavailable: <reason>` | `bd` failed or printed something the band can't read. It never shows zeros in its place. |
 
-The Desktop app writes the starting and unavailable lines with brackets (`[fathom] starting…`), and while tasks are being made it leaves the percent blank where the terminal shows `0%`.
+The Desktop app writes the starting and unavailable lines with brackets (`[fathom] starting…`), and its lines under the label have no leading `▸`, since none of the design's Desktop frames has one.
 
-Each task segment has a color. In the Desktop app, every task except those not yet started also has a mark, so the states don't depend on color alone there.
+Each task segment has a color. The Desktop app's dark-theme bar tells the states apart by color alone, as the terminal's does. The box bar the Desktop draws for other themes also has a mark in every segment except those not yet started.
 
-| Task | Color | Mark (Desktop app) |
+| Task | Color | Mark (box bar, other Desktop themes) |
 |---|---|---|
 | Done | Green | ✓ |
 | Done, review still open | Coral | ◐ |
 | In progress | Yellow | ● |
-| Next or waiting | Dark grey | none |
+| Next | Light grey on the Desktop's dark-theme bar, dark grey elsewhere | none |
+| Waiting | Dark grey | none |
 
 Fathom can split a large issue into bundles, a stack of branches that each get their own review. A task is in review when it is done and its bundle has a review recorded in the run's plan document (`.fathom/plans/<ref>.md`). The plan document doesn't say whether that review has merged, so a recorded review counts as open, and the task stays in review until every task is closed. A finished run has no reviews open. When some tasks are in review, the second row adds `· 2 in review`.
 
-The terminal's bar is a thin line, far shorter than a row and too thin for a mark, so there the states are told apart by color alone. The second and third rows carry what the colors can't: how many tasks are in review, and which task is running or next.
+The terminal's bar and the Desktop's dark-theme bar are thin, too thin for a mark, so there the states are told apart by color alone. The second and third rows carry what the colors can't: how many tasks are in review, and which task is running or next.
 
 The segments are equal widths. Fathom doesn't record a size for each task yet.
 
@@ -145,11 +146,11 @@ A title that is too long for the row is cut with an ellipsis. The count of tasks
 
 ### The Terminal and the Desktop App
 
-Both show the same run. They arrange and draw it differently.
+Both show the same run, in the same three rows. They draw the bar differently.
 
 - **Terminal.** The band is three rows, as in the design: the bar and percent, then the dot, ref and label, then the task. The bar is a row of heavy line characters (`━`), so it is thin like the design's bar and sits in the middle of its row. It fills the window: it takes every character the left margin, the gap and the percent leave, with no upper limit, and the percent follows it. The segments are equal widths, so the bar can stop up to a few characters short of the end of the row. It has no marks and no step count in it. The design leaves 2 pixels between segments, and no line character stops closer to the edge of a character than its middle. Each segment but the last therefore ends in a heavy half line (`╸`), which leaves half a character between segments, about 4.5 pixels at the width the design uses. I tried a quarter-height block (`▂`) first, and its gaps were a whole character wide. `beads-status` gets about 1 pixel with a seven-eighths block (`▉`), but its bar is a full row tall. The first version of the bar stopped at 55 characters, the width of the design's first frame, and the percent was pushed to the end of the row, far from it in a wide window. The design's later frame (`64:792`) lets the bar fill the row with the percent right after it, which is what the terminal draws now.
-- **Desktop app, dark theme.** The bar is a rounded image (a Scalable Vector Graphics image, SVG) with the count in a pill at the head of the fill. An SVG can't read theme colors, so its colors are fixed to the dark theme.
-- **Desktop app, any other theme.** The bar is drawn from colored boxes that follow the theme. I built and unit-tested this one but have not seen it in the app.
+- **Desktop app, dark theme.** The bar is an image (a Scalable Vector Graphics image, SVG) of thin rounded segments, one for each task, 3 pixels apart, as the design draws them. It has no count or marks in it. The percent follows it after 12 pixels, and the bar fills the rest of the row. While the tasks are being made it is one grey segment for each task made, sharing the whole bar. An SVG can't read theme colors, so its colors are fixed to the dark theme.
+- **Desktop app, any other theme.** The bar is drawn from colored boxes that follow the theme, in the same three rows. A box is as tall as a row and can't be rounded, so this bar is not thin like the SVG, and it keeps the marks and the step count (`3 of 5`) in its last segment. I built and unit-tested this one but have not seen it in the app.
 
 ### The cmux Sidebar
 
@@ -356,9 +357,11 @@ Running `claude -p "..." --debug-file f` with a prompt that starts a Fathom skil
 
 The terminal band follows the States section of the Claude Mods Figma file (file key `oG40tY6cPL2NzsJiZQ2gwg`, node `59:791`): planned, executing, finished and creating, each in a terminal frame. The file's Band component (`56:220`) adds the starting, unavailable, between-tasks, nine-task and narrow variants, and the terminal follows those too. A few notes in the component are out of date. Its text still describes marks inside the bar and a 45-cell bar at 78 columns, and the frames no longer show either.
 
-The Desktop band still follows the earlier frames: A1 Planned (`9:274`), A2 Executing (`9:289`) and A3 Done (`9:314`). The first drafts, including the per-task pills, are in section `11:77`. Those frames have no creating or starting state, so the Desktop's two are placeholders (`claude-mods-fathom-5l2.7`).
+The Desktop band follows the Desktop section (`79:1402`): Creating, Planned, Executing 1/5, Executing with two done tasks in review, Completed and Error, each in a 500-pixel card. It replaces the earlier frames, A1 Planned (`9:274`), A2 Executing (`9:289`) and A3 Done (`9:314`), and the first drafts with per-task pills in section `11:77`. The section has no starting or unavailable frame, so the Desktop's two are still placeholders (`claude-mods-fathom-5l2.7`).
 
-`desktop.ts` takes its colors from the "Claude Code theme" collection in that file (Dark mode). I checked success, claude and subtle against what a terminal renders for the dark theme, and each is within two of the Figma value. The yellow for in progress is the collection's `warning`, and I haven't compared it to a terminal render. The terminal band uses theme keys, not those values. The design's dim text (`dimText`, `#8c8c8c`) isn't one of the engine's theme keys, so I read it as the `dimColor` the band already used for its second row. I haven't compared that to a terminal render either.
+Three things in the section I read rather than copied. The task line says `planning  3 tasks so far` in all six frames, so only the Creating frame's text is the design's, and the other lines are the terminal's without the `▸`. The frames hide the `· N in review` that the Row component has, and the band shows it after the label, because a bar with no marks says "in review" by color alone. The design's bar is 420 pixels in a 500-pixel card, and the band's fills the row, as it did before. The band does not draw the Error frame (task 4 red, task 5 waiting), because nothing in the Beads data says a task failed.
+
+`desktop.ts` takes its colors from the "Claude Code theme" collection in that file (Dark mode). I checked success, claude and subtle against what a terminal renders for the dark theme, and each is within two of the Figma value. The yellow for in progress is the collection's `warning` and the lighter grey for the next task is its `inactive`, and I haven't compared either to a terminal render. The terminal band uses theme keys, not those values. The design's dim text (`dimText`, `#8c8c8c`) isn't one of the engine's theme keys, so I read it as the `dimColor` the band already used for its second row. I haven't compared that to a terminal render either.
 
 ### Extending It
 
@@ -368,6 +371,7 @@ The Desktop band still follows the earlier frames: A1 Planned (`9:274`), A2 Exec
 - **A ref from plain words.** The Skill tool's call event has no arguments, so a request in plain words can arm the band but can't name the issue. A prompt's text would have to be parsed for it.
 - **Continuing a run without a Fathom command.** `claude --continue` followed by ordinary prompts leaves the band idle, because nothing arms it.
 - **Two runs in one workspace.** The pill is per pane and the bar is shared. A run that ends while the other owns the bar leaves it, and a run that ends while it owns the bar clears it, so the other run's bar returns only at that run's next change. Resending the bar on a slow timer would close that gap, at one cmux call per interval, against the goal that a poll sends nothing. The options are in `claude-mods-fathom-5l2.14.7`.
+- **An error state.** The design's Error frame colors a failed task red (`error`, `#F83A55`). When a task fails, Fathom keeps it in progress and reports the failure in the transcript, and Beads has no status for a failed task, so the band has nothing to read. Fathom would have to record the failure first.
 - **A rounded bar on other Desktop themes.** `Box` has no corner radius and an `Svg` has fixed colors, so only the dark theme gets the rounded bar. Another theme needs its own palette in `desktop.ts` (`paletteFor` returns one only for `dark`).
 
 ### Issue Tracking
@@ -390,6 +394,6 @@ I have run `bd dolt push`. I haven't run `bd dolt pull` from a second clone.
 
 ## Status
 
-The terminal band's three-row layout with the thin bar is new. Its unit and render tests pass, and the type-check and `claude plugin validate` are clean. I watched it in an interactive Claude Code session inside tmux, on a scratch repository, through the creating, executing (two tasks in review) and finished states at 100, 80 and 50 columns. The `[-]` sat on the bar's row, and the band needed no row of padding above the bar. That run drew a 55-character bar with `▂`. After I let the bar fill the window, I read the row at 200, 150, 100, 80 and 60 columns: the bar grew with the window, the percent started one character after it each time, and six characters separated the percent from the `[-]`. I then switched it to `━` with half-line gaps and saw the new bar come up after `/reload-plugins`, but I haven't compared it with the design's bar. tmux drew the colors from the 256-color palette, so I haven't seen the exact theme colors. At 22 columns the bar gives way to the count, and the label wraps onto a second line. Before that change, the terminal band, the Desktop's dark-theme SVG bar and the arming on a Team organization account had each been seen working: the first two in a scratch repository, the third in a work profile. The typed-ref and branch-fallback logic has unit tests and headless runs in a real repository, and I haven't yet watched it in a live session. I haven't seen the Desktop's non-dark bar, or the new arming signals in the Desktop app.
+The terminal band's three-row layout with the thin bar is new. Its unit and render tests pass, and the type-check and `claude plugin validate` are clean. I watched it in an interactive Claude Code session inside tmux, on a scratch repository, through the creating, executing (two tasks in review) and finished states at 100, 80 and 50 columns. The `[-]` sat on the bar's row, and the band needed no row of padding above the bar. That run drew a 55-character bar with `▂`. After I let the bar fill the window, I read the row at 200, 150, 100, 80 and 60 columns: the bar grew with the window, the percent started one character after it each time, and six characters separated the percent from the `[-]`. I then switched it to `━` with half-line gaps and saw the new bar come up after `/reload-plugins`, but I haven't compared it with the design's bar. tmux drew the colors from the 256-color palette, so I haven't seen the exact theme colors. At 22 columns the bar gives way to the count, and the label wraps onto a second line. Before that change, the terminal band, the Desktop's dark-theme SVG bar and the arming on a Team organization account had each been seen working: the first two in a scratch repository, the third in a work profile. The typed-ref and branch-fallback logic has unit tests and headless runs in a real repository, and I haven't yet watched it in a live session. I haven't seen the Desktop's non-dark bar, or the new arming signals in the Desktop app. The Desktop's dark-theme bar that I saw working was the earlier one, with the track and the pill. The new one, with thin segments in three rows, has unit and render tests, and I haven't type-checked it or seen it in the Desktop app. I haven't checked whether the app centers the 6-pixel bar on the percent's line, or how it sets the 12 pixels before the percent.
 
 The cmux row has been seen working in cmux's dark theme, for a full run, hiding and showing the band, `/clear`, the end of a session, a failed `bd` read, and with the workspace both selected and not. With two runs in one workspace, each pane keeps its pill, and a run that ends leaves a bar that is the other run's. If the run that ended owned the bar, the other run's bar is missing until that run's next change. I haven't seen it in a light theme or a remote workspace, and the Desktop app doesn't use it. I haven't verified that a finished run leaves an unread badge from cmux's own integration.
