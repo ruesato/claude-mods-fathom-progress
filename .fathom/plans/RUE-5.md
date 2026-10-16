@@ -3,6 +3,8 @@
 - Issue: https://linear.app/ruesato/issue/RUE-5/update-desktop-versions-ux
 - Ref: RUE-5
 - Branch: feat/rue-5-update-desktop-versions-ux
+- Review: 1 https://github.com/ruesato/claude-mods-fathom-progress/pull/1
+- Finalization: complete
 
 ## Issue description
 
