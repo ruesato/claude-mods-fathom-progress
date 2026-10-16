@@ -465,8 +465,8 @@ function drawTerminal(ui: Ui, bodyColumns: number, snapshot: Exclude<Snapshot, {
 // event on, so beads-status can draw there).
 //
 // `target` says where it draws. On the desktop, with a palette for the person's theme, the
-// bar is the Svg of the design's frames, with its head pill; with none it is boxes in the
-// theme's colors. Anywhere else it is the terminal's band, three rows with a thin bar.
+// bar is the Svg of the design's thin segments; with none it is boxes in the theme's colors.
+// Anywhere else it is the terminal's band, three rows with a thin bar.
 export function drawBand(
   ui: Ui,
   bodyColumns: number,
@@ -530,7 +530,7 @@ export function drawBand(
 
   const svg =
     hasSvg && target.palette && tasks.length > 0
-      ? barSvg(tasks, { palette: target.palette, isFinished, width: desktopBarWidth(bodyColumns, label) })
+      ? barSvg(tasks, { palette: target.palette, width: desktopBarWidth(bodyColumns, label) })
       : null
 
   const segments = !svg && tasks.length > 0 ? desktopSegments(tasks, desktopCells) : null

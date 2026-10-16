@@ -435,7 +435,7 @@ test('desktop planned, executing and done keep the head row, the bar with its st
   await done.ui.unmount()
 })
 
-test('on the desktop, with a palette for the theme, the bar is one Svg with the head pill, and the step text is not drawn beside it', async ($, on) => {
+test('on the desktop, with a palette for the theme, the bar is one Svg of thin segments, and the step text is not drawn beside it', async ($, on) => {
   const { show } = band($, on)
   const { ui, head, line } = await show(EXECUTING, 'desktop', 80, DARK)
 
@@ -443,8 +443,10 @@ test('on the desktop, with a palette for the theme, the bar is one Svg with the 
   expect(svg).toBeDefined()
   expect(svg?.props?.alt).toBe('2 of 5 tasks done, 1 in review, task 3 in progress')
   // 80 cells at 7.9px, less the dot, three gaps, the label's 21 characters and the percent's box.
-  expect([svg?.props?.width, svg?.props?.height]).toEqual([412, 16])
-  expect(svg?.props?.source).toContain('>2/5</text>')
+  expect([svg?.props?.width, svg?.props?.height]).toEqual([412, 6])
+  // A segment for each of the five tasks, and no count drawn inside the bar.
+  expect(svg?.props?.source?.match(/class="segment"/g)).toHaveLength(5)
+  expect(svg?.props?.source).not.toContain('<text')
   // The label, percent and line stay Text, so they follow the theme.
   expect(head.startsWith('●SLU-123 Progress band')).toBe(true)
   expect(head.endsWith(' 40%')).toBe(true)
@@ -474,7 +476,7 @@ test('on the desktop with no palette for the theme the bar is boxes in the theme
   await terminal.ui.unmount()
 })
 
-test('the desktop Svg bar draws for planned and finished runs too, and while the tasks are made it is a growing track with no pill', async ($, on) => {
+test('the desktop Svg bar draws for planned and finished runs too, and while the tasks are made it is one waiting segment for each', async ($, on) => {
   const { show } = band($, on)
 
   for (const snapshot of [PLANNED, DONE]) {
@@ -485,8 +487,10 @@ test('the desktop Svg bar draws for planned and finished runs too, and while the
   const creating = await show({ kind: 'creating', ref: 'SLU-123', created: 3 }, 'desktop', 80, DARK)
   const svg = (await creating.ui.find({ type: 'Svg' })) as unknown as { props?: { alt?: string; width?: number; source?: string } } | undefined
   expect(svg?.props?.alt).toBe('3 tasks made so far')
-  expect(svg?.props?.width).toBe(108)
-  expect(svg?.props?.source).not.toContain('class="pill"')
+  // The three made share the whole width the row leaves, as the design's Creating frame does.
+  expect(svg?.props?.width).toBe(412)
+  expect(svg?.props?.source?.match(/class="segment"/g)).toHaveLength(3)
+  expect(svg?.props?.source).not.toContain('<text')
   expect(creating.head).not.toContain('━')
   await creating.ui.unmount()
 
