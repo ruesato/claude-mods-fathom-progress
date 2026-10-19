@@ -50,16 +50,28 @@ export type RunTask = {
   isInReview: boolean
 }
 
+// Where a `/fathom:scaffold` run stands, worked out from the events a mod sees (the
+// tracker's MCP calls, the questions it asks, the turn ending), since scaffold records
+// nothing a mod can read. `resolving` is the lookups before the tracker is verified;
+// `drafting` is after, until the person is asked; `waiting` is the run waiting on the
+// person (a question, or the draft's approval); `creating` is the tracker issues being
+// made; `done` is created and handed off, or handed to execute.
+export type ScaffoldPhase = 'resolving' | 'drafting' | 'waiting' | 'creating' | 'done'
+
 // What the band shows. `idle` is not armed, so the band yields. `starting` is armed
-// with no run found yet. `creating` has an epic and the tasks made so far, with no
-// total: the plan document that fixes it is written after the last task. `executing`
-// and `finished` carry every task, and the issue's `title` when the plan document
-// names one. `creating` has no title because the plan is written after the tasks, and
-// bd holds none: Fathom makes the epic with the bare ref as its title. `unavailable`
-// carries why bd could not be read, so the band can say so instead of showing zeros.
+// with no run found yet. `scaffold` is a scaffold run: its phase, and how many tracker
+// issues it has made so far (the main issue and its sub-issues), with no total: the draft
+// the person approves is text, so the count is known only as the issues appear. `creating`
+// has an epic and the tasks made so far, with no total: the plan document that fixes it
+// is written after the last task. `executing` and `finished` carry every task, and the
+// issue's `title` when the plan document names one. `creating` has no title because the
+// plan is written after the tasks, and bd holds none: Fathom makes the epic with the bare
+// ref as its title. `unavailable` carries why bd could not be read, so the band can say
+// so instead of showing zeros.
 export type Snapshot =
   | { kind: 'idle' }
   | { kind: 'starting' }
+  | { kind: 'scaffold'; phase: ScaffoldPhase; created: number }
   | { kind: 'creating'; ref: string; created: number }
   | { kind: 'executing'; ref: string; title?: string; tasks: RunTask[] }
   | { kind: 'finished'; ref: string; title?: string; tasks: RunTask[] }

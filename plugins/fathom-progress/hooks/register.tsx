@@ -7,7 +7,7 @@ import { NONE, barLabelOn, cmuxEntries, isOurBar, meterValue, pillKeyFor } from 
 import type { CmuxEntries } from './cmux'
 import { paletteFor } from './desktop'
 import { drawBand } from './draw'
-import { POLL_MS, planPath, refsOfBranch, refsOfPrompt, startOf, startOfPrompt, touchesRun } from './lifecycle'
+import { POLL_MS, planPath, refsOfBranch, refsOfPrompt, snapshotOnStart, startOf, startOfPrompt, touchesRun } from './lifecycle'
 import { parsePlan } from './plan'
 import { parseEpics, pickRun, toSnapshot } from './state'
 
@@ -198,7 +198,8 @@ const SAME_START_MS = 3000
 
 // A Fathom skill started. Execute arms the band: it shows `starting` until the epic
 // exists, then follows the run. Scaffold writes no beads, so there is no run to follow:
-// it shows `starting` and disarms, which also stops the poll.
+// it disarms, which also stops the poll, and clears the band, since nothing would ever
+// move it off `starting`.
 async function arm($: EngineInterface, start: 'execute' | 'scaffold' | null, via: string, refs: readonly string[] = []) {
   if (start === null) return
   const now = await $.clock.now()
@@ -215,7 +216,7 @@ async function arm($: EngineInterface, start: 'execute' | 'scaffold' | null, via
   }
   await update($, armedAt, () => (start === 'execute' ? now : null))
   await update($, armedRefs, () => [...refs])
-  await update($, snapshot, () => ({ kind: 'starting' }))
+  await update($, snapshot, () => snapshotOnStart(start))
   void publish($)
   $.ui.log(`fathom-progress: armed (${start}) by ${via}, typed refs ${refs.join(',') || '-'}`, { to: 'debug' })
   if (start === 'execute') void refresh($)

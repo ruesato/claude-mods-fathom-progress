@@ -1,0 +1,6 @@
+{
+  "name": "fathom-probe",
+  "version": "0.0.1",
+  "description": "Throwaway probe for claude-mods-fathom-5l2.2: logs what the engine reports so the fathom-progress hooks are written against facts. Draws nothing and changes nothing.",
+  "author": { "name": "Ryan Uesato" }
+}

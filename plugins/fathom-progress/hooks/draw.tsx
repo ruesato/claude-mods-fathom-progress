@@ -1,9 +1,11 @@
 import type { EngineInterface } from 'claude-code'
 
-import type { RunTask, Snapshot } from '../types'
+import type { RunTask, ScaffoldPhase, Snapshot } from '../types'
 import { allocate } from './bar'
 import { PERCENT_CELLS, PERCENT_GAP_PX, barSvg, desktopBarWidth, growingSvg } from './desktop'
 import type { Palette } from './desktop'
+import { phaseText, stepsText } from './scaffold'
+import type { ScaffoldState } from './scaffold'
 import { currentOf, progressOf } from './state'
 
 // The element table `$.ui.resolve(e)` returns. This file never sees `$`: the engine
@@ -390,6 +392,27 @@ function drawTerminalLine(ui: Ui, text: string) {
   )
 }
 
+// A scaffold has no tasks to divide a bar by, so it is two rows, the same on both surfaces:
+// the dot and what the run is doing, then the steps as a dim line, with a check before the
+// ones finished and an arrow at the current one so no state rests on the dot's color alone.
+// The dot is yellow while the run waits on the person, green when done and the band's
+// own color otherwise. `pad`, `top` and `line` are the surface's: the terminal's rows start a
+// cell in, and the desktop's are flush, with a row above and the line indented past the dot.
+function scaffoldDot(phase: ScaffoldPhase): string {
+  return phase === 'waiting' ? LOOKS.inProgress.color : phase === 'done' ? LOOKS.done.color : 'claude'
+}
+
+function drawScaffold(ui: Ui, snapshot: ScaffoldState, { columns, pad, top, line }: { columns: number; pad: number; top?: number; line: (text: string) => ReturnType<typeof drawLine> }) {
+  const { Box } = ui
+  const label = titleParts(`scaffold · ${phaseText(snapshot)}`, '', '', columns - 2).label
+  return (
+    <Box flexDirection="column" paddingTop={top}>
+      {drawTitle(ui, scaffoldDot(snapshot.phase), { label, note: '' }, pad)}
+      {line(stepsText(snapshot.phase))}
+    </Box>
+  )
+}
+
 function drawTerminal(ui: Ui, bodyColumns: number, snapshot: Exclude<Snapshot, { kind: 'idle' }>) {
   const { Box, Text } = ui
 
@@ -407,6 +430,10 @@ function drawTerminal(ui: Ui, bodyColumns: number, snapshot: Exclude<Snapshot, {
         <Text dimColor wrap="truncate-end">{`fathom unavailable: ${snapshot.reason}`}</Text>
       </Box>
     )
+  }
+
+  if (snapshot.kind === 'scaffold') {
+    return drawScaffold(ui, snapshot, { columns: bodyColumns - PAD, pad: PAD, line: text => drawTerminalLine(ui, text) })
   }
 
   const room = barWidth(bodyColumns)
@@ -496,6 +523,10 @@ export function drawBand(
         <Text dimColor wrap="truncate-end">{`[fathom] unavailable: ${snapshot.reason}`}</Text>
       </Box>
     )
+  }
+
+  if (snapshot.kind === 'scaffold') {
+    return drawScaffold(ui, snapshot, { columns: bodyColumns, pad: 0, top: TOP_GAP, line: text => drawLine(ui, text) })
   }
 
   const hasSvg = !!target.palette && 'Svg' in ui

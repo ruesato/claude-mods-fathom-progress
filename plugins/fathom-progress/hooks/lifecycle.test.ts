@@ -1,6 +1,11 @@
 import { test, expect } from 'claude-code/testing'
 
-import { planPath, refsIn, refsOfBranch, refsOfPrompt, startOf, startOfPrompt, touchesRun } from './lifecycle'
+import { planPath, refsIn, refsOfBranch, refsOfPrompt, snapshotOnStart, startOf, startOfPrompt, touchesRun } from './lifecycle'
+
+test('execute starts on `starting`, and scaffold, which nothing polls, shows nothing', async () => {
+  expect(snapshotOnStart('execute')).toEqual({ kind: 'starting' })
+  expect(snapshotOnStart('scaffold')).toEqual({ kind: 'idle' })
+})
 
 test('startOf names which Fathom skill started, with or without the plugin prefix', async () => {
   expect(startOf('fathom:execute')).toBe('execute')

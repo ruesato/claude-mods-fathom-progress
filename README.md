@@ -84,11 +84,11 @@ The band shows `fathom starting…` right away (`[fathom] starting…` in the De
 
 The band appears when Fathom's `execute` skill starts, and not before. Three signals can start it, and you don't choose between them:
 
-- You type `/fathom:execute` (or `/fathom:scaffold`).
+- You type `/fathom:execute`.
 - Claude calls the Skill tool with a Fathom skill, for example because you asked for it in plain words. This depends on Claude choosing to call the tool.
 - The engine reports the skill's own text as a skill prompt. On the Team organization account I used, this signal never reached the mod (see "Team Organization Accounts" below), so the first two carry it there.
 
-`/fathom:scaffold` writes no Beads tasks, so there is no run to follow. It shows `fathom starting…` and stops there.
+`/fathom:scaffold` writes no Beads tasks, so there is no run to follow. The band stays hidden for it, and clears one left over from an earlier run.
 
 The band goes away when the session ends, and after `/clear`. When no Fathom run is active it passes the space to `beads-status`.
 
@@ -184,7 +184,7 @@ What I know about the limits:
 
 - **Nothing appears after `/fathom:execute`.** Run `/plugin` and look for fathom-progress in the line that counts the active mods. If it isn't there, check that the session started after you installed it or saved the setting, then check the path. A session that was already running at that point doesn't load the mod.
 - **`beads-status` draws instead.** If you load both from folders, move fathom-progress ahead of it in `CLAUDE_CODE_PLUGIN_DIRS`. If fathom-progress is installed and `beads-status` is loaded from a folder, load fathom-progress from a folder too. If you installed both, `beads-status` was installed first. Uninstall it and install it again so that it comes second (see Install).
-- **The band stays on `fathom starting…`** (`[fathom] starting…` in the Desktop app). Either Fathom hasn't created its issue yet, no issue matches the ref you typed, or you ran `scaffold`. Run `bd list --type epic --all` in the project and look for the issue ref in the epic's external ref.
+- **The band stays on `fathom starting…`** (`[fathom] starting…` in the Desktop app). Either Fathom hasn't created its issue yet, or no issue matches the ref you typed. Run `bd list --type epic --all` in the project and look for the issue ref in the epic's external ref.
 - **`fathom unavailable: …`** (with brackets in the Desktop app). The reason is the first line `bd` printed to stderr. Run the same `bd` command by hand.
 - **You hid it.** Run `/fathom-progress` once more.
 
@@ -254,8 +254,8 @@ The module registers these hooks:
 |---|---|
 | `session.start` | Starts the poll timer and registers `/fathom-progress`. |
 | `session.end` | Resets the arm time, the typed refs and the snapshot. |
-| `skill.prompt` | Arms on `fathom:execute` and `fathom:scaffold`. |
-| `prompt.submit` | Arms from a typed `/fathom:execute` or `/fathom:scaffold`, and takes the typed refs. |
+| `skill.prompt` | Arms on `fathom:execute`. `fathom:scaffold` clears the band. |
+| `prompt.submit` | Arms from a typed `/fathom:execute` and takes the typed refs. A typed `/fathom:scaffold` clears the band. |
 | `tool.call` (Skill) | Arms from the Skill tool. The event carries the skill name and no arguments. |
 | `tool.call` (Bash) | Refreshes when the command touched the run. |
 | `command.run` (`fathom-progress`) | Toggles the band. |

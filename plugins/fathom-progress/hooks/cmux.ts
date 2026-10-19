@@ -1,5 +1,6 @@
 import type { Snapshot } from '../types'
 import { DARK } from './desktop'
+import { issues } from './scaffold'
 import { currentOf, progressOf } from './state'
 
 // What the band puts on a cmux workspace's sidebar row, worked out from the same snapshot
@@ -38,8 +39,8 @@ export const MAX_PILL_TEXT = 30
 // yellow for work in progress, green when done. The red is not from the design (the Figma
 // collection has no failure state for this); it is macOS's system red.
 const COLOR = {
-  getting: DARK.pill,
-  working: DARK.inProgress ?? DARK.pill,
+  getting: DARK.review,
+  working: DARK.inProgress,
   done: DARK.done,
   failed: '#FF453A',
 } as const
@@ -49,6 +50,9 @@ const ICON = {
   starting: 'hourglass',
   planning: 'list.bullet',
   working: 'hammer',
+  drafting: 'pencil',
+  asking: 'questionmark.circle',
+  making: 'plus.circle',
   done: 'checkmark.circle',
   failed: 'exclamationmark.triangle',
 } as const
@@ -70,6 +74,28 @@ export function cmuxEntries(snapshot: Snapshot): CmuxEntries {
       const made = snapshot.created
       const text = made === 0 ? 'planning' : `planning · ${made} task${made === 1 ? '' : 's'}`
       return { pill: { text: clip(text), icon: ICON.planning, color: COLOR.getting }, meter: null }
+    }
+
+    // A scaffold run's phase. The pill is yellow while it waits on the person, as the
+    // band's dot is. The count of issues has no bar to go in, since there is no total.
+    case 'scaffold': {
+      const { phase, created } = snapshot
+      const made = created === 0 ? '' : `${issues(created)} made`
+      const text = {
+        resolving: 'scaffold · checking tracker',
+        drafting: 'scaffold · drafting',
+        waiting: 'scaffold · waiting on you',
+        creating: `scaffold · ${made || 'creating'}`,
+        done: `scaffold · done${made ? `, ${made}` : ''}`,
+      }[phase]
+      const style = {
+        resolving: { icon: ICON.starting, color: COLOR.getting },
+        drafting: { icon: ICON.drafting, color: COLOR.getting },
+        waiting: { icon: ICON.asking, color: COLOR.working },
+        creating: { icon: ICON.making, color: COLOR.getting },
+        done: { icon: ICON.done, color: COLOR.done },
+      }[phase]
+      return { pill: { text: clip(text), ...style }, meter: null }
     }
 
     case 'executing': {

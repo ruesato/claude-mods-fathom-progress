@@ -36,6 +36,33 @@ test('creating counts the tasks made so far, and has no bar since there is no to
   expect(cmuxEntries({ kind: 'creating', ref: 'SLU-1', created: 3 }).meter).toBeNull()
 })
 
+test('the pills use the band\'s own colors, never an undefined one', async () => {
+  for (const snapshot of [{ kind: 'starting' }, { kind: 'creating', ref: 'SLU-1', created: 1 }, { kind: 'scaffold', phase: 'resolving', created: 0 }, { kind: 'scaffold', phase: 'waiting', created: 0 }] as Snapshot[]) {
+    expect(cmuxEntries(snapshot).pill?.color).toMatch(/^#[0-9A-F]{6}$/i)
+  }
+})
+
+test('a scaffold run is a pill per phase, with the issues made so far, and never a bar', async () => {
+  const pill = (phase: 'resolving' | 'drafting' | 'waiting' | 'creating' | 'done', created: number) => cmuxEntries({ kind: 'scaffold', phase, created }).pill
+  expect(pill('resolving', 0)?.text).toBe('scaffold · checking tracker')
+  expect(pill('drafting', 0)?.text).toBe('scaffold · drafting')
+  expect(pill('waiting', 0)?.text).toBe('scaffold · waiting on you')
+  expect(pill('creating', 0)?.text).toBe('scaffold · creating')
+  expect(pill('creating', 1)?.text).toBe('scaffold · 1 issue made')
+  expect(pill('creating', 12)?.text).toBe('scaffold · 12 issues made')
+  expect(pill('done', 5)?.text).toBe('scaffold · done, 5 issues made')
+  expect(pill('done', 0)?.text).toBe('scaffold · done')
+  expect(cmuxEntries({ kind: 'scaffold', phase: 'creating', created: 3 }).meter).toBeNull()
+})
+
+test('a scaffold pill fits the row, waiting is yellow like the band\'s dot, and done is green', async () => {
+  for (const phase of ['resolving', 'drafting', 'waiting', 'creating', 'done'] as const) {
+    expect((cmuxEntries({ kind: 'scaffold', phase, created: 99 }).pill?.text ?? '').length).toBeLessThanOrEqual(MAX_PILL_TEXT)
+  }
+  expect(cmuxEntries({ kind: 'scaffold', phase: 'waiting', created: 0 }).pill?.color).toBe(DARK.inProgress)
+  expect(cmuxEntries({ kind: 'scaffold', phase: 'done', created: 5 }).pill?.color).toBe(DARK.done)
+})
+
 test('executing shows the count, the task in progress, and a bar of done over total', async () => {
   const { pill, meter } = cmuxEntries(executing(2, 'inProgress'))
   expect(pill?.text).toBe('2/5 · now 3')

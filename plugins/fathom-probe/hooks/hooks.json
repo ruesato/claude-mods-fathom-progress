@@ -1,0 +1,4 @@
+{
+  "description": "Logs what a mod sees during a /fathom:scaffold run, for claude-mods-fathom-fbf.1.2.",
+  "modules": ["./scaffold-probe.ts"]
+}

@@ -236,6 +236,80 @@ test('desktop creating shows the tasks made so far, 0% where the percent goes, a
   await ui.unmount()
 })
 
+const SCAFFOLD = (phase: 'resolving' | 'drafting' | 'waiting' | 'creating' | 'done', created = 0): Snapshot => ({ kind: 'scaffold', phase, created })
+
+test('a scaffold is two rows on both surfaces: the dot and what the run is doing, then the steps with the finished ones checked', async ($, on) => {
+  const { show } = band($, on)
+  const frames: [Snapshot, string, string][] = [
+    [SCAFFOLD('resolving'), '●scaffold · checking the tracker', '▸ resolve  draft  create  done'],
+    [SCAFFOLD('drafting'), '●scaffold · drafting the issues', '✓ resolve  ▸ draft  create  done'],
+    [SCAFFOLD('waiting'), '●scaffold · waiting on you', '✓ resolve  ▸ draft  create  done'],
+    [SCAFFOLD('creating', 0), '●scaffold · creating issues', '✓ resolve  ✓ draft  ▸ create  done'],
+    [SCAFFOLD('creating', 3), '●scaffold · creating, 3 issues made', '✓ resolve  ✓ draft  ▸ create  done'],
+    [SCAFFOLD('done', 5), '●scaffold · done, 5 issues made', '✓ resolve  ✓ draft  ✓ create  ✓ done'],
+  ]
+  for (const surface of ['terminal', 'desktop'] as const) {
+    for (const [snapshot, label, steps] of frames) {
+      const { ui, head, title, tree } = await show(snapshot, surface)
+      // The first row is the label and the second the steps. No bar, no percent.
+      expect(head).toBe(label)
+      expect(title).toBe(steps)
+      expect(tree?.children).toHaveLength(2)
+      expect(head).not.toContain('%')
+      await ui.unmount()
+    }
+  }
+})
+
+test('a scaffold on the desktop has a row of padding above it for the engine\'s [-], and on the terminal none', async ($, on) => {
+  const { show } = band($, on)
+  const desktop = await show(SCAFFOLD('drafting'), 'desktop')
+  expect(desktop.tree?.props?.paddingTop).toBe(1)
+  await desktop.ui.unmount()
+  const terminal = await show(SCAFFOLD('drafting'), 'terminal')
+  expect(terminal.tree?.props?.paddingTop).toBeUndefined()
+  await terminal.ui.unmount()
+})
+
+test('the scaffold dot is yellow while waiting on the person, green when done, and the band\'s color otherwise', async ($, on) => {
+  const { show } = band($, on)
+  const colorOfDot = async (snapshot: Snapshot) => {
+    const { ui } = await show(snapshot, 'terminal')
+    const dot = await ui.find({ type: 'Text', text: '●' })
+    await ui.unmount()
+    return (dot as unknown as { props?: { color?: string } } | undefined)?.props?.color
+  }
+  expect(await colorOfDot(SCAFFOLD('resolving'))).toBe('claude')
+  expect(await colorOfDot(SCAFFOLD('drafting'))).toBe('claude')
+  expect(await colorOfDot(SCAFFOLD('waiting'))).toBe('warning')
+  expect(await colorOfDot(SCAFFOLD('creating', 2))).toBe('claude')
+  expect(await colorOfDot(SCAFFOLD('done', 5))).toBe('success')
+})
+
+test('a scaffold draws the same two rows at 50, 80 and 100 columns', async ($, on) => {
+  const { show } = band($, on)
+  for (const surface of ['terminal', 'desktop'] as const) {
+    for (const columns of [50, 80, 100]) {
+      const { ui, head, title, tree } = await show(SCAFFOLD('creating', 4), surface, columns)
+      expect(head).toBe('●scaffold · creating, 4 issues made')
+      expect(title).toBe('✓ resolve  ✓ draft  ▸ create  done')
+      expect(tree?.children).toHaveLength(2)
+      await ui.unmount()
+    }
+  }
+})
+
+test('a narrow window cuts the scaffold label and the steps instead of wrapping them', async ($, on) => {
+  const { show } = band($, on)
+  const { ui, head, title } = await show(SCAFFOLD('creating', 12), 'terminal', 24)
+  // 24 columns less the cell of padding and the dot with its gap leaves 21 for the label.
+  expect(head.length).toBeLessThanOrEqual(1 + 21)
+  expect(head.endsWith('…')).toBe(true)
+  expect(head.startsWith('●scaffold · creating')).toBe(true)
+  expect(title.length).toBeGreaterThan(0)
+  await ui.unmount()
+})
+
 test('terminal starting and unavailable say so in one dim line, without the brackets the desktop keeps', async ($, on) => {
   const { show } = band($, on)
   const reason = 'bd list exited 1: Error: no beads database found'
