@@ -1,6 +1,6 @@
 import { test, expect } from 'claude-code/testing'
 
-import { advance, isCreate, isPreflight, phaseText, startScaffold, stepsText } from './scaffold'
+import { advance, callEvent, inputOf, isCreate, isPreflight, phaseText, resultEvent, startScaffold, stepsText } from './scaffold'
 import type { ScaffoldEvent, ScaffoldState } from './scaffold'
 
 const LINEAR = 'mcp__linear-server__'
@@ -169,4 +169,24 @@ test('the steps line checks what is finished and points at the current step, wit
   expect(stepsText('waiting')).toBe('✓ resolve  ▸ draft  create  done')
   expect(stepsText('creating')).toBe('✓ resolve  ✓ draft  ▸ create  done')
   expect(stepsText('done')).toBe('✓ resolve  ✓ draft  ✓ create  ✓ done')
+})
+
+test('a tool.call event becomes a call event with the engine\'s own fields taken off', async () => {
+  const e = { tool: `${LINEAR}save_issue`, tool_use_id: 'toolu_1', title: 'x', parentId: 'RUE-17' }
+  expect(inputOf(e)).toEqual({ title: 'x', parentId: 'RUE-17' })
+  expect(callEvent(e.tool, inputOf(e))).toEqual({ kind: 'call', tool: `${LINEAR}save_issue`, input: { title: 'x', parentId: 'RUE-17' } })
+})
+
+test('a result is an error when the tool said so or the engine refused the call, and not otherwise', async () => {
+  const input = { title: 'x' }
+  const isError = (result: unknown) => (resultEvent(`${LINEAR}save_issue`, input, result) as { isError: boolean }).isError
+  expect(isError({ result: {}, text: 'ok' })).toBe(false)
+  expect(isError({ result: {}, text: 'no', isError: true })).toBe(true)
+  expect(isError({ deny: 'blocked' })).toBe(true)
+  expect(isError(undefined)).toBe(false)
+})
+
+test('a create refused by the engine is not counted', async () => {
+  const asked = run([callEvent(`${LINEAR}save_issue`, MAIN)])
+  expect(advance(asked, resultEvent(`${LINEAR}save_issue`, MAIN, { deny: 'blocked' })).created).toBe(0)
 })

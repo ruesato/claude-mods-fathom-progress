@@ -53,6 +53,24 @@ export function isCreate(tool: string, input: Readonly<Record<string, unknown>>)
 
 const ASK = 'AskUserQuestion'
 
+// A tool.call event as the arguments it carried: everything but the engine's own `tool`
+// and `tool_use_id` fields.
+export function inputOf(e: Readonly<Record<string, unknown>>): Record<string, unknown> {
+  const { tool: _tool, tool_use_id: _id, ...input } = e
+  return input
+}
+
+export function callEvent(tool: string, input: Readonly<Record<string, unknown>>): ScaffoldEvent {
+  return { kind: 'call', tool, input }
+}
+
+// The same call once it came back. A call the engine refused (`deny`) did not make
+// anything, so it counts as an error like one the tool reported.
+export function resultEvent(tool: string, input: Readonly<Record<string, unknown>>, result: unknown): ScaffoldEvent {
+  const r = (result ?? {}) as { isError?: unknown; deny?: unknown }
+  return { kind: 'result', tool, input, isError: r.isError === true || typeof r.deny === 'string' }
+}
+
 // Whether the skill the Skill tool was asked for is execute, which is what scaffold hands
 // off to. The engine reports a skill as `fathom:execute`, and a bare name is accepted too.
 function isExecute(input: Readonly<Record<string, unknown>>): boolean {

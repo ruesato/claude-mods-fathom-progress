@@ -9,6 +9,8 @@ import { paletteFor } from './desktop'
 import { drawBand } from './draw'
 import { POLL_MS, planPath, refsOfBranch, refsOfPrompt, snapshotOnStart, startOf, startOfPrompt, touchesRun } from './lifecycle'
 import { parsePlan } from './plan'
+import { advance, callEvent, inputOf, resultEvent } from './scaffold'
+import type { ScaffoldEvent } from './scaffold'
 import { parseEpics, pickRun, toSnapshot } from './state'
 
 const armedAt = atom({ plugin: 'fathom-progress', key: 'armedAt' } as const, null)
@@ -193,16 +195,46 @@ async function refresh($: EngineInterface) {
   }
 }
 
+// One event at a time, in the order they came: two overlapping ones could read the same
+// state and lose a count. Only a scaffold run is moved; for anything else the state is left
+// as it is, so an execute run never sees these events. Not awaited by the hooks, so Claude
+// gets its tool's result and its turn at once, and a failure here is only logged.
+let scaffoldQueue: Promise<void> = Promise.resolve()
+
+function feedScaffold($: EngineInterface, event: ScaffoldEvent): void {
+  scaffoldQueue = scaffoldQueue.then(async () => {
+    try {
+      const current = await read($, snapshot)
+      if (current.kind !== 'scaffold') return
+      const next = advance(current, event)
+      if (next === current) return
+      await update($, snapshot, () => next)
+      void publish($)
+    } catch (error) {
+      $.ui.log(`fathom-progress: scaffold event failed: ${error instanceof Error ? error.message : String(error)}`, { to: 'debug' })
+    }
+  })
+}
+
 // One start reaches arm by more than one signal within about this long.
 const SAME_START_MS = 3000
 
 // A Fathom skill started. Execute arms the band: it shows `starting` until the epic
-// exists, then follows the run. Scaffold writes no beads, so there is no run to follow:
-// it disarms, which also stops the poll, and clears the band, since nothing would ever
-// move it off `starting`.
+// exists, then follows the run. Scaffold writes no beads, so there is no run to follow: it
+// disarms, which also stops the poll, and shows its first phase, which the events of the run
+// move on (feedScaffold).
+// When the last scaffold started, so the second signal of one start (a typed command is a
+// `skill.prompt` and a `prompt.submit`) does not put a run already moving back on its
+// first phase.
+let lastScaffoldAt = Number.NEGATIVE_INFINITY
+
 async function arm($: EngineInterface, start: 'execute' | 'scaffold' | null, via: string, refs: readonly string[] = []) {
   if (start === null) return
   const now = await $.clock.now()
+  if (start === 'scaffold') {
+    if (now - lastScaffoldAt < SAME_START_MS) return
+    lastScaffoldAt = now
+  }
   // One start can reach here by more than one signal (a typed command is a `skill.prompt`
   // and a `prompt.submit`): the later ones, moments after the first, add nothing, except
   // the refs, which only the typed command carries and which may come second.
@@ -273,8 +305,35 @@ export const register: Register = on => {
 
   on('tool.call', { tool: 'Skill' }, async ($, e, next) => {
     try {
-      if (typeof e.skill === 'string') await arm($, startOf(e.skill), 'tool.call')
+      if (typeof e.skill === 'string') {
+        // Scaffold handing off to execute ends the scaffold run; arm then starts execute's.
+        feedScaffold($, callEvent('Skill', { skill: e.skill }))
+        await arm($, startOf(e.skill), 'tool.call')
+      }
     } catch {}
+    return next(e)
+  })
+
+  // What a scaffold run does is visible only as its calls: the tracker's MCP tools and the
+  // questions it asks, which are the only ones the phases read. Each is passed on as it
+  // came, and its result is returned as it came.
+  on('tool.call', { tool: ['AskUserQuestion', /^mcp__/] }, async ($, e, next) => {
+    const tool = String(e.tool)
+    const input = inputOf(e as unknown as Record<string, unknown>)
+    feedScaffold($, callEvent(tool, input))
+    const result = await next(e)
+    feedScaffold($, resultEvent(tool, input, result))
+    return result
+  })
+
+  // A turn is the model's work for one prompt. A subagent's turns are not the run's.
+  on('turn.start', async ($, e, next) => {
+    if ((e as { agentId?: string }).agentId === undefined) feedScaffold($, { kind: 'turn.start' })
+    return next(e)
+  })
+
+  on('turn.complete', async ($, e, next) => {
+    if ((e as { agentId?: string }).agentId === undefined) feedScaffold($, { kind: 'turn.complete' })
     return next(e)
   })
 

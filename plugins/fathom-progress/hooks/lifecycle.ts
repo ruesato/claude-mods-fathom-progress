@@ -1,4 +1,5 @@
 import type { Snapshot } from '../types'
+import { startScaffold } from './scaffold'
 
 // The small decisions the lifecycle in register.tsx makes, pulled out so they can be
 // tested: register.tsx reads engine state, which is empty in a test, so none of its
@@ -10,7 +11,7 @@ import type { Snapshot } from '../types'
 // whatever the model passes. `review` and `ship` do not start a run, and the plugin's
 // internal `fathom-shared` is never invoked.
 //
-// Only execute writes beads, so only execute has a run to find: scaffold arms nothing,
+// Only execute writes beads, so only execute has a run to find: scaffold arms no poll,
 // which also keeps the band from showing some older open run as if scaffold had started
 // it.
 export function startOf(skill: string): 'execute' | 'scaffold' | null {
@@ -31,10 +32,10 @@ export function startOfPrompt(text: string): 'execute' | 'scaffold' | null {
 
 // What the band shows the moment a Fathom skill starts. Execute shows `starting` until
 // its epic exists, and the poll then takes over. Scaffold has no epic to wait for and
-// nothing polls for it, so `starting` would never change: it shows nothing, and a
-// finished run's band from before is cleared rather than left under a scaffold.
+// nothing polls for it: it starts on its first phase, and the events of the run move it on
+// (scaffold.ts). That also replaces a finished run's band from before.
 export function snapshotOnStart(start: 'execute' | 'scaffold'): Snapshot {
-  return start === 'execute' ? { kind: 'starting' } : { kind: 'idle' }
+  return start === 'execute' ? { kind: 'starting' } : startScaffold()
 }
 
 // The issue refs in some text, in order and upper-cased, the way a tracker keys them

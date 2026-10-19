@@ -2,9 +2,9 @@ import { test, expect } from 'claude-code/testing'
 
 import { planPath, refsIn, refsOfBranch, refsOfPrompt, snapshotOnStart, startOf, startOfPrompt, touchesRun } from './lifecycle'
 
-test('execute starts on `starting`, and scaffold, which nothing polls, shows nothing', async () => {
+test('execute starts on `starting`, and scaffold, which nothing polls, on its first phase', async () => {
   expect(snapshotOnStart('execute')).toEqual({ kind: 'starting' })
-  expect(snapshotOnStart('scaffold')).toEqual({ kind: 'idle' })
+  expect(snapshotOnStart('scaffold')).toEqual({ kind: 'scaffold', phase: 'resolving', created: 0 })
 })
 
 test('startOf names which Fathom skill started, with or without the plugin prefix', async () => {

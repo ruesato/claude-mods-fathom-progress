@@ -82,13 +82,13 @@ The band shows `fathom starting…` right away (`[fathom] starting…` in the De
 
 ### Starting the Band
 
-The band appears when Fathom's `execute` skill starts, and not before. Three signals can start it, and you don't choose between them:
+The band appears when Fathom's `execute` or `scaffold` skill starts, and not before. Three signals can start it, and you don't choose between them:
 
-- You type `/fathom:execute`.
+- You type `/fathom:execute` (or `/fathom:scaffold`).
 - Claude calls the Skill tool with a Fathom skill, for example because you asked for it in plain words. This depends on Claude choosing to call the tool.
 - The engine reports the skill's own text as a skill prompt. On the Team organization account I used, this signal never reached the mod (see "Team Organization Accounts" below), so the first two carry it there.
 
-`/fathom:scaffold` writes no Beads tasks, so there is no run to follow. The band stays hidden for it, and clears one left over from an earlier run.
+`/fathom:scaffold` writes no Beads tasks, so the band has no run to read. It follows a scaffold another way, described under "A Scaffold Run" below.
 
 The band goes away when the session ends, and after `/clear`. When no Fathom run is active it passes the space to `beads-status`.
 
@@ -144,6 +144,30 @@ Three of the four plans I read in my own repository have that heading. Fathom's 
 
 A title that is too long for the row is cut with an ellipsis. The count of tasks in review gives way first, and the ref stays whole while it can.
 
+### A Scaffold Run
+
+Scaffold makes a main issue and its sub-issues in Linear or Asana and records nothing in Beads, so the band can't read its progress the way it reads an execute run. It watches what Claude does instead: the tracker calls it makes and the questions it asks. The band shows four steps, `resolve`, `draft`, `create` and `done`, with a check before each finished step and an arrow at the current one. While Claude creates the issues, the band also counts how many exist so far. There is no total and no percent, because the draft you approve is text, and the count is only known as the issues appear.
+
+```
+ ● scaffold · creating, 3 issues made
+ ✓ resolve  ✓ draft  ▸ create  done
+```
+
+*A schematic of the terminal layout, not a screenshot.* The dot is yellow while the scaffold waits on you (a question, or the draft's approval), green when it is done, and the band's usual color otherwise. On the cmux row it is a pill with the same wording.
+
+What moves it, as I saw it in one run against Linear:
+
+- **Resolve to draft.** Claude's call that verifies the tracker connection (`get_user` on Linear).
+- **Waiting on you.** A question to you. Your answer, or your next message, puts the band back on draft.
+- **Create.** Each `save_issue` call with no issue id. A call with an id is an update and isn't counted, and neither is a call the tracker refuses.
+- **Done.** A question after an issue was made (the "run execute now?" hand-off), Claude starting execute, or the turn ending after an issue was made. Starting execute replaces the scaffold band with execute's.
+
+Limits:
+
+- Linear is the only tracker it reads. I haven't seen the calls Asana makes, so on Asana the band can't tell a finished scaffold from one waiting on you. Don't rely on it there.
+- A scaffold that ends before it makes any issue (the tracker connection is missing, for example) stays on "waiting on you" until you start another Fathom command or end the session.
+- I haven't checked a Team organization account.
+
 ### The Terminal and the Desktop App
 
 Both show the same run, in the same three rows. They draw the bar differently.
@@ -185,6 +209,7 @@ What I know about the limits:
 - **Nothing appears after `/fathom:execute`.** Run `/plugin` and look for fathom-progress in the line that counts the active mods. If it isn't there, check that the session started after you installed it or saved the setting, then check the path. A session that was already running at that point doesn't load the mod.
 - **`beads-status` draws instead.** If you load both from folders, move fathom-progress ahead of it in `CLAUDE_CODE_PLUGIN_DIRS`. If fathom-progress is installed and `beads-status` is loaded from a folder, load fathom-progress from a folder too. If you installed both, `beads-status` was installed first. Uninstall it and install it again so that it comes second (see Install).
 - **The band stays on `fathom starting…`** (`[fathom] starting…` in the Desktop app). Either Fathom hasn't created its issue yet, or no issue matches the ref you typed. Run `bd list --type epic --all` in the project and look for the issue ref in the epic's external ref.
+- **The band says `waiting on you` after a scaffold finished.** On Asana the band can't read a finished scaffold, and a scaffold that stopped before it made an issue looks the same. Start another Fathom command or end the session to clear it.
 - **`fathom unavailable: …`** (with brackets in the Desktop app). The reason is the first line `bd` printed to stderr. Run the same `bd` command by hand.
 - **You hid it.** Run `/fathom-progress` once more.
 
@@ -210,6 +235,7 @@ plugins/fathom-progress/
     hooks.json                  lists the one module the engine loads
     register.tsx                every call into the engine ($), and the hook wiring
     lifecycle.ts                pure: which skills start a run, refs, plan path, poll timing
+    scaffold.ts                 pure: a scaffold run's calls and turns to its phase and count
     state.ts                    pure: bd output to epics, the run to follow, the snapshot
     plan.ts                     pure: reads .fathom/plans/<ref>.md
     bd.ts                       reads what bd printed, or says why there is nothing
@@ -254,9 +280,11 @@ The module registers these hooks:
 |---|---|
 | `session.start` | Starts the poll timer and registers `/fathom-progress`. |
 | `session.end` | Resets the arm time, the typed refs and the snapshot. |
-| `skill.prompt` | Arms on `fathom:execute`. `fathom:scaffold` clears the band. |
-| `prompt.submit` | Arms from a typed `/fathom:execute` and takes the typed refs. A typed `/fathom:scaffold` clears the band. |
-| `tool.call` (Skill) | Arms from the Skill tool. The event carries the skill name and no arguments. |
+| `skill.prompt` | Arms on `fathom:execute` and `fathom:scaffold`. |
+| `prompt.submit` | Arms from a typed `/fathom:execute` or `/fathom:scaffold`, and takes the typed refs. |
+| `tool.call` (Skill) | Arms from the Skill tool. The event carries the skill name and no arguments. A scaffold calling `execute` ends the scaffold run. |
+| `tool.call` (`AskUserQuestion`, MCP tools) | Moves a scaffold run: the tracker check, each issue made, each question. Does nothing for an execute run. |
+| `turn.start`, `turn.complete` | A reply resumes a scaffold that is waiting on you, and the end of a turn after an issue was made finishes it. |
 | `tool.call` (Bash) | Refreshes when the command touched the run. |
 | `command.run` (`fathom-progress`) | Toggles the band. |
 | `ui.render` (`AbovePrompt`) | Draws the band. |
@@ -395,5 +423,7 @@ I have run `bd dolt push`. I haven't run `bd dolt pull` from a second clone.
 ## Status
 
 The terminal band's three-row layout with the thin bar is new. Its unit and render tests pass, and the type-check and `claude plugin validate` are clean. I watched it in an interactive Claude Code session inside tmux, on a scratch repository, through the creating, executing (two tasks in review) and finished states at 100, 80 and 50 columns. The `[-]` sat on the bar's row, and the band needed no row of padding above the bar. That run drew a 55-character bar with `▂`. After I let the bar fill the window, I read the row at 200, 150, 100, 80 and 60 columns: the bar grew with the window, the percent started one character after it each time, and six characters separated the percent from the `[-]`. I then switched it to `━` with half-line gaps and saw the new bar come up after `/reload-plugins`, but I haven't compared it with the design's bar. tmux drew the colors from the 256-color palette, so I haven't seen the exact theme colors. At 22 columns the bar gives way to the count, and the label wraps onto a second line. Before that change, the terminal band, the Desktop's dark-theme SVG bar and the arming on a Team organization account had each been seen working: the first two in a scratch repository, the third in a work profile. The typed-ref and branch-fallback logic has unit tests and headless runs in a real repository, and I haven't yet watched it in a live session. I haven't seen the Desktop's non-dark bar, or the new arming signals in the Desktop app. The Desktop's dark-theme bar that I saw working was the earlier one, with the track and the pill. The new one, with thin segments in three rows, has unit and render tests, and I haven't type-checked it or seen it in the Desktop app. I haven't checked whether the app centers the 6-pixel bar on the percent's line, or how it sets the 12 pixels before the percent.
+
+The scaffold band is new. Its tests pass, including ones that raise the real hooks and move the band from `resolve` through `create` to `done`, and the type-check and `claude plugin validate` are clean. The calls it reads come from one Linear run. I haven't seen the band in a terminal session, the Desktop app or cmux, so its glyphs, its colors and the three cmux icon names (`pencil`, `questionmark.circle` and `plus.circle`) are unchecked.
 
 The cmux row has been seen working in cmux's dark theme, for a full run, hiding and showing the band, `/clear`, the end of a session, a failed `bd` read, and with the workspace both selected and not. With two runs in one workspace, each pane keeps its pill, and a run that ends leaves a bar that is the other run's. If the run that ended owned the bar, the other run's bar is missing until that run's next change. I haven't seen it in a light theme or a remote workspace, and the Desktop app doesn't use it. I haven't verified that a finished run leaves an unread badge from cmux's own integration.
