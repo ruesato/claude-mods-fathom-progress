@@ -10,6 +10,7 @@ import { paletteFor } from './desktop'
 import { drawBand } from './draw'
 import {
   POLL_MS,
+  beadsPath,
   checklistPath,
   planPath,
   refsOfBranch,
@@ -111,7 +112,9 @@ async function build($: EngineInterface, since: number, typed: readonly string[]
     const epic = pickRun(epics, since, { refs, isExact: typed.length > 0 })
     // Beads wins, so the checklist files are read only when bd has no epic to follow.
     const files = epic === null ? await checklistsOf($, root, refs) : new Map<string, string>()
-    const source = runSourceOf({ epic, bdError: error, refs, files })
+    // Whether bd failing means anything is asked only when it could matter: no run to follow.
+    const hasBeads = epic === null && error !== null && files.size === 0 ? await $.fs.exists(beadsPath(root)) : true
+    const source = runSourceOf({ epic, bdError: error, hasBeads, refs, files })
 
     const run = source.kind === 'beads' ? source.epic.ref : source.kind === 'checklist' ? `${source.ref} (checklist)` : 'nothing'
     const followed = `${run} (typed ${typed.join(',') || '-'}, branch ${branch.join(',') || '-'})`

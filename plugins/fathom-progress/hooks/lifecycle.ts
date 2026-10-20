@@ -74,6 +74,11 @@ function recordPath(root: string, dir: 'plans' | 'tasks', ref: string): string |
     : null
 }
 
+// The folder beads keeps its workspace in. A repository without it does not use beads.
+export function beadsPath(root: string): string {
+  return `${root.replace(/\/+$/, '')}/.beads`
+}
+
 // The plan document of a run: .fathom/plans/<ref>.md.
 export function planPath(root: string, ref: string): string | null {
   return recordPath(root, 'plans', ref)

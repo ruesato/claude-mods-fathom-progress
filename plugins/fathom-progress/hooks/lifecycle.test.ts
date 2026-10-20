@@ -1,6 +1,6 @@
 import { test, expect } from 'claude-code/testing'
 
-import { checklistPath, planPath, refsIn, refsOfBranch, refsOfPrompt, snapshotOnStart, startOf, startOfPrompt, touchesRun } from './lifecycle'
+import { beadsPath, checklistPath, planPath, refsIn, refsOfBranch, refsOfPrompt, snapshotOnStart, startOf, startOfPrompt, touchesRun } from './lifecycle'
 
 test('execute starts on `starting`, and scaffold, which nothing polls, on its first phase', async () => {
   expect(snapshotOnStart('execute')).toEqual({ kind: 'starting' })
@@ -81,6 +81,11 @@ test('checklistPath puts a plain ref under .fathom/tasks and refuses the refs pl
   for (const ref of ['', '.', '..', '../x', 'a/b', 'a b', 'x\n', '$(id)']) {
     expect(checklistPath('/work/repo', ref)).toBeNull()
   }
+})
+
+test('beadsPath is the .beads folder under the root, whether or not the root ends in a slash', async () => {
+  expect(beadsPath('/work/repo')).toBe('/work/repo/.beads')
+  expect(beadsPath('/work/repo/')).toBe('/work/repo/.beads')
 })
 
 test('a bd call or a commit may have changed the run, and other commands have not', async () => {

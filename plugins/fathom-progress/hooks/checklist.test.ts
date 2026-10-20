@@ -316,13 +316,13 @@ const EPIC: Epic = { id: 'e1', ref: 'ONC-5', status: 'open', createdAt: 0, updat
 const FILES = new Map([['ONC-5', listOf('- [ ] 1. One')]])
 
 test('beads wins when it has an epic, even if a checklist for the ref also exists', async () => {
-  const source = runSourceOf({ epic: EPIC, bdError: null, refs: ['ONC-5'], files: FILES })
+  const source = runSourceOf({ epic: EPIC, bdError: null, hasBeads: true, refs: ['ONC-5'], files: FILES })
 
   expect(source).toEqual({ kind: 'beads', epic: EPIC })
 })
 
 test('with no epic the checklist for the ref is used', async () => {
-  const source = runSourceOf({ epic: null, bdError: null, refs: ['ONC-5'], files: FILES })
+  const source = runSourceOf({ epic: null, bdError: null, hasBeads: true, refs: ['ONC-5'], files: FILES })
 
   expect(source.kind).toBe('checklist')
   expect(source.kind === 'checklist' && source.ref).toBe('ONC-5')
@@ -330,37 +330,102 @@ test('with no epic the checklist for the ref is used', async () => {
 })
 
 test('a bd that failed does not hide a readable checklist', async () => {
-  const source = runSourceOf({ epic: null, bdError: 'bd list exited 127: command not found', refs: ['ONC-5'], files: FILES })
+  const source = runSourceOf({ epic: null, bdError: 'bd list exited 127: command not found', hasBeads: true, refs: ['ONC-5'], files: FILES })
 
   expect(source.kind).toBe('checklist')
 })
 
 test('the first ref that has a checklist is the one followed', async () => {
   const files = new Map([['ONC-6', listOf('- [ ] 1. Six')]])
-  const source = runSourceOf({ epic: null, bdError: null, refs: ['ONC-5', 'ONC-6'], files })
+  const source = runSourceOf({ epic: null, bdError: null, hasBeads: true, refs: ['ONC-5', 'ONC-6'], files })
 
   expect(source.kind === 'checklist' && source.ref).toBe('ONC-6')
 })
 
 test('no epic and no checklist is a run that has not begun, when bd could be read', async () => {
-  expect(runSourceOf({ epic: null, bdError: null, refs: ['ONC-5'], files: new Map() })).toEqual({ kind: 'starting' })
+  expect(runSourceOf({ epic: null, bdError: null, hasBeads: true, refs: ['ONC-5'], files: new Map() })).toEqual({ kind: 'starting' })
 })
 
 test('no epic and no checklist shows why bd could not be read, never a run that has not begun', async () => {
-  const source = runSourceOf({ epic: null, bdError: 'bd list did not print JSON', refs: ['ONC-5'], files: new Map() })
+  const source = runSourceOf({ epic: null, bdError: 'bd list did not print JSON', hasBeads: true, refs: ['ONC-5'], files: new Map() })
 
   expect(source).toEqual({ kind: 'unavailable', reason: 'bd list did not print JSON' })
 })
 
 test('with no ref there is no checklist to look for', async () => {
-  expect(runSourceOf({ epic: null, bdError: null, refs: [], files: FILES })).toEqual({ kind: 'starting' })
-  expect(runSourceOf({ epic: null, bdError: 'no bd', refs: [], files: FILES })).toEqual({ kind: 'unavailable', reason: 'no bd' })
+  expect(runSourceOf({ epic: null, bdError: null, hasBeads: true, refs: [], files: FILES })).toEqual({ kind: 'starting' })
+  expect(runSourceOf({ epic: null, bdError: 'no bd', hasBeads: true, refs: [], files: FILES })).toEqual({ kind: 'unavailable', reason: 'no bd' })
 })
 
 test('a file that is not a checklist is followed as one, and the band says so instead of going blank', async () => {
-  const source = runSourceOf({ epic: null, bdError: null, refs: ['ONC-5'], files: new Map([['ONC-5', 'hello']]) })
+  const source = runSourceOf({ epic: null, bdError: null, hasBeads: true, refs: ['ONC-5'], files: new Map([['ONC-5', 'hello']]) })
 
   expect(source.kind === 'checklist' && toChecklistSnapshot({ ref: 'ONC-5', checklist: source.checklist, plan: null }).kind).toBe(
     'unavailable',
   )
+})
+
+// The text scripts/bench/play-checklist.sh writes, step 6 of the chain timeline and step 4 of
+// the parallel one, copied as it is. The band's live checks lean on these reading as the run
+// they stand for, so a change to the parser that broke them would fail here first.
+const BENCH_CHAIN_6 = [
+  '# BENCH-1: Bench run',
+  '',
+  '- Issue: https://example.test/BENCH-1',
+  '- Branch: feat/bench-1-bench-run',
+  '- Review: (id and url, filled at open)',
+  '',
+  '## Plan',
+  '',
+  'Written by scripts/bench/play-checklist.sh, not by Fathom.',
+  '',
+  '## Tasks',
+  '',
+  '- [x] 1. Create bench/a.txt -> sub-issue: SUB-1 (done 2026-10-20, a1b2c31)',
+  '- [x] 2. Create bench/b.txt (deps: 1) -> sub-issue: SUB-2 (done 2026-10-20)',
+  '- [>] 3. Create bench/c.txt (deps: 2) -> sub-issue: SUB-3',
+].join('\n')
+
+const BENCH_PARALLEL_4 = [
+  '## Tasks',
+  '',
+  '- [>] 1. Create bench/a.txt -> sub-issue: SUB-1',
+  '- [>] 2. Create bench/b.txt -> sub-issue: SUB-2',
+  '- [ ] 3. Create bench/c.txt (deps: 1, 2) -> sub-issue: SUB-3',
+].join('\n')
+
+test('what the bench harness writes reads as the run it stands for', async () => {
+  const chain = parseChecklist(BENCH_CHAIN_6)
+
+  expect(chain.title).toBe('Bench run')
+  expect(chain.tasks.map(t => t.hash)).toEqual(['a1b2c31', null, null])
+  expect(tasksOf(snapshotOf(BENCH_CHAIN_6)).map(t => t.state)).toEqual(['done', 'done', 'inProgress'])
+  expect(tasksOf(snapshotOf(BENCH_PARALLEL_4)).map(t => t.state)).toEqual(['inProgress', 'inProgress', 'waiting'])
+})
+
+test('where there is no .beads/, a bd that cannot be read is the normal state: the band waits instead of failing', async () => {
+  for (const bdError of ['bd list exited 1: Error: no beads database found', 'bd list exited 127: bd: command not found']) {
+    const source = runSourceOf({ epic: null, bdError, hasBeads: false, refs: ['ONC-5'], files: new Map() })
+
+    expect(source).toEqual({ kind: 'starting' })
+  }
+})
+
+test('where there is a .beads/, a bd that cannot be read is still unavailable', async () => {
+  const source = runSourceOf({
+    epic: null,
+    bdError: 'bd list exited 1: Error: no beads database found',
+    hasBeads: true,
+    refs: ['ONC-5'],
+    files: new Map(),
+  })
+
+  expect(source).toEqual({ kind: 'unavailable', reason: 'bd list exited 1: Error: no beads database found' })
+})
+
+test('having no .beads/ changes nothing when there is an epic or a checklist to follow', async () => {
+  const bdError = 'bd list exited 1: Error: no beads database found'
+
+  expect(runSourceOf({ epic: EPIC, bdError: null, hasBeads: false, refs: ['ONC-5'], files: new Map() }).kind).toBe('beads')
+  expect(runSourceOf({ epic: null, bdError, hasBeads: false, refs: ['ONC-5'], files: FILES }).kind).toBe('checklist')
 })

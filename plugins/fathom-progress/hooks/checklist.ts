@@ -184,9 +184,15 @@ export type RunSource =
   | { kind: 'starting' }
   | { kind: 'unavailable'; reason: string }
 
+//
+// `hasBeads` is whether the repository has a `.beads/` folder. It matters only when bd could
+// not be read and there is no run to follow: in a repository with no `.beads/`, bd failing
+// (`no beads database found`, or no bd at all) is the normal state, and the run has simply
+// not written its checklist yet.
 export function runSourceOf(input: {
   epic: Epic | null
   bdError: string | null
+  hasBeads: boolean
   refs: readonly string[]
   files: ReadonlyMap<string, string>
 }): RunSource {
@@ -195,7 +201,9 @@ export function runSourceOf(input: {
     const text = input.files.get(ref)
     if (text !== undefined) return { kind: 'checklist', ref, checklist: parseChecklist(text) }
   }
-  // A bd that could not be read must not look like a run that has not begun, and a
-  // checklist, when there is one, has already been preferred to it.
-  return input.bdError === null ? { kind: 'starting' } : { kind: 'unavailable', reason: input.bdError }
+  // A bd that could not be read must not look like a run that has not begun, where the
+  // repository uses beads. A checklist, when there is one, has already been preferred.
+  return input.bdError === null || !input.hasBeads
+    ? { kind: 'starting' }
+    : { kind: 'unavailable', reason: input.bdError }
 }
