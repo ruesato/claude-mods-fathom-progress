@@ -1,6 +1,6 @@
 import { test, expect } from 'claude-code/testing'
 
-import { planPath, refsIn, refsOfBranch, refsOfPrompt, snapshotOnStart, startOf, startOfPrompt, touchesRun } from './lifecycle'
+import { beadsPath, checklistPath, planPath, refsIn, refsOfBranch, refsOfPrompt, snapshotOnStart, startOf, startOfPrompt, touchesRun } from './lifecycle'
 
 test('execute starts on `starting`, and scaffold, which nothing polls, on its first phase', async () => {
   expect(snapshotOnStart('execute')).toEqual({ kind: 'starting' })
@@ -73,6 +73,19 @@ test('planPath refuses a ref that could leave the directory or is not a token', 
   for (const ref of ['', '.', '..', '../x', 'a/b', 'a b', 'x\n', '$(id)']) {
     expect(planPath('/work/repo', ref)).toBeNull()
   }
+})
+
+test('checklistPath puts a plain ref under .fathom/tasks and refuses the refs planPath refuses', async () => {
+  expect(checklistPath('/work/repo', 'ONC-5')).toBe('/work/repo/.fathom/tasks/ONC-5.md')
+  expect(checklistPath('/work/repo/', 'ONC-5')).toBe('/work/repo/.fathom/tasks/ONC-5.md')
+  for (const ref of ['', '.', '..', '../x', 'a/b', 'a b', 'x\n', '$(id)']) {
+    expect(checklistPath('/work/repo', ref)).toBeNull()
+  }
+})
+
+test('beadsPath is the .beads folder under the root, whether or not the root ends in a slash', async () => {
+  expect(beadsPath('/work/repo')).toBe('/work/repo/.beads')
+  expect(beadsPath('/work/repo/')).toBe('/work/repo/.beads')
 })
 
 test('a bd call or a commit may have changed the run, and other commands have not', async () => {

@@ -2,7 +2,7 @@
 
 fathom-progress is a Claude Code mod that draws a progress band above the prompt while Fathom works through an issue. The band shows the issue, how many of its tasks are done, and the task in progress. It is for people who run Fathom's `execute` skill and want to see where a run stands without reading the transcript.
 
-A mod is a plugin that changes Claude Code's own interface or behavior. Fathom is a Claude Code plugin that takes an Asana or Linear issue from breakdown through implementation to an open code review, and records its tasks in Beads, a local issue tracker with a command-line tool called `bd`. fathom-progress reads those Beads tasks and draws them. It never changes them.
+A mod is a plugin that changes Claude Code's own interface or behavior. Fathom is a Claude Code plugin that takes an Asana or Linear issue from breakdown through implementation to an open code review, and records its tasks in Beads, a local issue tracker with a command-line tool called `bd`. In a repository that doesn't use Beads, Fathom records them in a checklist file instead. fathom-progress reads the tasks from either place and draws them. It never changes them.
 
 I built it with Claude Code. It works in the terminal and in the Claude Code Desktop app. Inside cmux, a terminal app, it also puts the run on the workspace's sidebar row.
 
@@ -20,7 +20,7 @@ I built it with Claude Code. It works in the terminal and in the Claude Code Des
 
 - Claude Code with mods. I built and tested this on 2.1.295 and 2.1.296. The Desktop app (version 2.31226.1) bundles Claude Code 2.1.293 and 2.1.295. I have not tried earlier versions.
 - The Fathom plugin. I tested with 2.7.1.
-- Beads (`bd`), with the project set up for it. I tested with `bd` 1.1.0 and 1.3.1. Fathom must be recording its tasks in Beads, since that is where the band reads them.
+- Beads (`bd`), if the project uses it. I tested with `bd` 1.1.0 and 1.3.1. Without Beads, Fathom records its tasks in `.fathom/tasks/<ref>.md`, which the band reads with no `bd` at all (see "Where It Reads the Tasks").
 - `git`. The band reads the current branch name to find the issue when you don't type one.
 
 ### Install
@@ -102,17 +102,32 @@ The band follows one issue at a time and picks it in this order:
 
 Asana's numeric task refs are not read yet, and a ref written in a plain-words request is not used (only a typed command carries one).
 
+### Where It Reads the Tasks
+
+Fathom records a run's tasks in one of two places, and the band reads either one.
+
+- **Beads.** Fathom uses Beads when the repository's base branch tracks a `.beads/` workspace and `bd` works. The band reads the tasks with `bd`, as "How a Run Becomes a Band" describes.
+- **A checklist.** In any other repository Fathom keeps the tasks in `.fathom/tasks/<ref>.md`, one line per task, marked `[ ]` for open, `[>]` for in progress and `[x]` for done. The band reads that file from your working tree and not from git, because Fathom leaves the in-progress marker uncommitted until the task's commit. The band needs no `bd` for it.
+
+An issue has one or the other. When `bd` finds a run for the ref, the band uses it and doesn't open a checklist. When `bd` finds none, the band looks for `.fathom/tasks/<ref>.md` for the ref you typed, or else the ref in the branch name. A `bd` that is missing or fails therefore doesn't hide a checklist. With no checklist either, the band depends on the repository. If it has a `.beads/` folder, the band shows `fathom unavailable` and the reason `bd` gave. If it has none, `bd` failing is the normal state (`no beads database found`), and the band shows `fathom starting…` until Fathom writes the checklist, which it does at breakdown, after it has read the issue.
+
+A checklist has no creation time, so the third rule under "Which Issue It Follows", the newest run with no ref, doesn't apply to it. Type the ref, or work on the issue's branch.
+
+The band reads a checklist's states from its markers and its `(deps: 1, 2)` lists. A `[x]` task is done and a `[>]` task is in progress. Several `[>]` lines are tasks running in parallel, and they all draw as in progress. A `[ ]` task is next when every task it depends on is done, and waiting when one isn't. A dependency on a task the file doesn't list counts as done, so one lost line can't stall the run. The title comes from the file's first line, as `# ONC-5: Add login flow`.
+
+The plan document, `.fathom/plans/<ref>.md`, is also written for a checklist run: Fathom's `execute` writes it at breakdown whichever backend it uses and adds the checklist file only when the checklist is the backend. The band reads the same review lines from it, so a task in review is marked the same way. A run without a plan document still draws.
+
 ### What the Band Shows
 
 In the terminal the first row is a bar with one segment per task, with the percent done right after it. The second row is a status dot, the issue's ref and its title (`PHA-368 Home page: Restrict actions and CTAs, add video`), followed by how many tasks are in review when any are. The third row names the task in progress, or the next one. The Desktop app has the same three rows. It writes `Progress band` after the ref instead of the title, because that is what the design's frames read, and I haven't designed a title for it.
 
 | State | Looks like | When |
 |---|---|---|
-| Starting | `fathom starting…` | Fathom has started and the issue isn't in Beads yet, or no issue matches the ref you typed. |
+| Starting | `fathom starting…` | Fathom has started and the issue isn't in Beads or in a checklist yet, or nothing matches the ref you typed. Also in a repository with no `.beads/` folder when `bd` can't be read, which is the normal state there. |
 | Planning | A bar that fills one slot for each task made, `0%`, the ref alone, then `▸ planning` and `3 tasks so far` | The run's issue and some tasks exist, but the plan document isn't written and no task has started, so the total isn't known. |
 | Executing | The full bar, `▸ now 3/5`, and the task's title | The plan document exists or a task has been claimed, and not every task is closed. |
 | Finished | A green bar and `✓ 5/5 done` | Every task is closed. |
-| Unavailable | `fathom unavailable: <reason>` | `bd` failed or printed something the band can't read. It never shows zeros in its place. |
+| Unavailable | `fathom unavailable: <reason>` | `bd` failed or printed something the band can't read, in a repository that has a `.beads/` folder, and there is no checklist for the ref. Also a file at `.fathom/tasks/<ref>.md` that isn't a Fathom checklist. It never shows zeros in its place. |
 
 The Desktop app writes the starting and unavailable lines with brackets (`[fathom] starting…`), and its lines under the label have no leading `▸`, since none of the design's Desktop frames has one.
 
@@ -134,7 +149,7 @@ The segments are equal widths. Fathom doesn't record a size for each task yet.
 
 #### Where the Title Comes From
 
-Beads doesn't have it. Fathom creates its epic with the bare ref as the title, and gives it no description. The band reads the title from the plan document, `.fathom/plans/<ref>.md`, in its first heading, written as `# PHA-368: Home page: Restrict actions and CTAs, add video`. Everything after the first colon and space is the title, so a title with colons in it stays whole.
+Beads doesn't have it. Fathom creates its epic with the bare ref as the title, and gives it no description. The band reads the title from the plan document, `.fathom/plans/<ref>.md`, in its first heading, written as `# PHA-368: Home page: Restrict actions and CTAs, add video`. Everything after the first colon and space is the title, so a title with colons in it stays whole. A checklist has the title in its own first line, in the same form, and the band reads that one first.
 
 Three of the four plans I read in my own repository have that heading. Fathom's conventions don't fix it the way they fix the `Issue`, `Ref` and `Branch` lines, so the band can find no title:
 
@@ -218,9 +233,9 @@ What I know about the limits:
 
 - **Nothing appears after `/fathom:execute`.** Run `/plugin` and look for fathom-progress in the line that counts the active mods. If it isn't there, check that the session started after you installed it or saved the setting, then check the path. A session that was already running at that point doesn't load the mod.
 - **`beads-status` draws instead.** If you load both from folders, move fathom-progress ahead of it in `CLAUDE_CODE_PLUGIN_DIRS`. If fathom-progress is installed and `beads-status` is loaded from a folder, load fathom-progress from a folder too. If you installed both, `beads-status` was installed first. Uninstall it and install it again so that it comes second (see Install).
-- **The band stays on `fathom starting…`** (`[fathom] starting…` in the Desktop app). Either Fathom hasn't created its issue yet, or no issue matches the ref you typed. Run `bd list --type epic --all` in the project and look for the issue ref in the epic's external ref.
+- **The band stays on `fathom starting…`** (`[fathom] starting…` in the Desktop app). Either Fathom hasn't created its issue yet, or no issue matches the ref you typed. Run `bd list --type epic --all` in the project and look for the issue ref in the epic's external ref. In a repository that doesn't use Beads, look for `.fathom/tasks/<ref>.md` in your working tree.
 - **The band says `Waiting on you` after a scaffold finished.** On Asana the band can't read a finished scaffold, and a scaffold that stopped before it made an issue looks the same. Start another Fathom command or end the session to clear it.
-- **`fathom unavailable: …`** (with brackets in the Desktop app). The reason is the first line `bd` printed to stderr. Run the same `bd` command by hand.
+- **`fathom unavailable: …`** (with brackets in the Desktop app). The reason is the first line `bd` printed to stderr. Run the same `bd` command by hand. If the reason says `.fathom/tasks/<ref>.md is not a Fathom checklist`, open that file: it needs a first line like `# ONC-5: Add login flow` and a `## Tasks` section.
 - **You hid it.** Run `/fathom-progress` once more.
 
 ### Team Organization Accounts
@@ -244,10 +259,11 @@ plugins/fathom-progress/
   hooks/
     hooks.json                  lists the one module the engine loads
     register.tsx                every call into the engine ($), and the hook wiring
-    lifecycle.ts                pure: which skills start a run, refs, plan path, poll timing
+    lifecycle.ts                pure: which skills start a run, refs, plan and checklist paths, poll timing
     scaffold.ts                 pure: a scaffold run's calls and turns to its phase and count
     state.ts                    pure: bd output to epics, the run to follow, the snapshot
     plan.ts                     pure: reads .fathom/plans/<ref>.md
+    checklist.ts                pure: reads .fathom/tasks/<ref>.md, its snapshot, and beads or checklist
     bd.ts                       reads what bd printed, or says why there is nothing
     draw.tsx                    draws the band from a snapshot (Box and Text, plus Svg)
     desktop.ts                  the Svg bar, the dark palette, the Desktop's pixel sizes
@@ -278,8 +294,8 @@ To release a version, raise `version` in `plugins/fathom-progress/.claude-plugin
 
 1. **Arm.** `arm` in `register.tsx` records when the run started (`armedAt`) and any refs you typed, and sets the snapshot to `starting`. One start can arrive by two signals, and a repeat within three seconds is counted once. The second signal can still add the typed refs, which only `prompt.submit` carries.
 2. **Refresh.** `refresh` runs once at arm, then every 10 seconds (`POLL_MS`) while the snapshot isn't `finished`, and after any Bash call that runs `bd` or `git commit` (`touchesRun`). One refresh runs at a time. A call that arrives during one asks for another straight after, so the last change is never missed.
-3. **Build.** `build` runs `bd list` for the epics, picks the run (`pickRun` in `state.ts`), then runs `bd list` for that epic's tasks and `bd ready` for the next one, and reads the plan document. The calls run in sequence because `bd` keeps one embedded database.
-4. **Snapshot.** `toSnapshot` orders the tasks by their `blocks` edges (`bd` lists them in no useful order, and `created_at` ties), and marks each as done, in progress, next or waiting. A done task whose bundle has a recorded review is marked in review. The result is stored in the engine's state.
+3. **Build.** `build` runs `bd list` for the epics (`epicsOf`, which keeps bd's error instead of throwing it) and picks the run (`pickRun` in `state.ts`). When there is an epic, it runs `bd list` for that epic's tasks and `bd ready` for the next one. When there is none, `checklistsOf` reads `.fathom/tasks/<ref>.md` for the typed or branch ref, and `runSourceOf` in `checklist.ts` chooses between the epic, the checklist, `starting` and `unavailable`. Then it reads the plan document. The `bd` calls run in sequence because `bd` keeps one embedded database.
+4. **Snapshot.** `toSnapshot` orders the tasks by their `blocks` edges (`bd` lists them in no useful order, and `created_at` ties), and marks each as done, in progress, next or waiting. `toChecklistSnapshot` does the same for a checklist, from its markers and `deps`, in task-number order. A done task whose bundle has a recorded review is marked in review. The result is stored in the engine's state.
 5. **Draw.** The `ui.render` hook for `AbovePrompt` reads the snapshot and calls `drawBand`. It passes the event on with `next(e)` when idle, hidden, or when a survey holds the spot.
 
 Fathom makes its epic with the issue ref as both the epic's `external_ref` and a label, and labels each task with the ref. `parseEpics` relies on that pair, so an epic without both is someone else's and is not a run. `bd` timestamps have one-second resolution, so `pickRun` rounds the arm time down to the second before comparing.
@@ -330,7 +346,7 @@ Two constraints from the engine shape the files.
 
 The engine's validator follows `$` (the handle to the engine) only inside the file that receives it, not across imports. A helper that takes `$` has to live in `register.tsx`. A helper in another file that took `$` would be rejected, which is why `draw.tsx` never sees `$`: `register.tsx` resolves the UI elements and fetches the data, and `draw.tsx` only draws them.
 
-The second is that `register.tsx` reads engine state, which is empty in a test, so none of its own code can be tested. Everything that decides something (which skill started a run, which ref was typed, which epic to follow, what the tasks' states are) is a pure function in `lifecycle.ts`, `state.ts`, `plan.ts` or `bd.ts`, and has tests.
+The second is that `register.tsx` reads engine state, which is empty in a test, so none of its own code can be tested. Everything that decides something (which skill started a run, which ref was typed, which epic to follow, what the tasks' states are) is a pure function in `lifecycle.ts`, `state.ts`, `plan.ts`, `checklist.ts` or `bd.ts`, and has tests.
 
 ### Working With the Engine
 
@@ -433,6 +449,8 @@ I have run `bd dolt push`. I haven't run `bd dolt pull` from a second clone.
 ## Status
 
 The terminal band's three-row layout with the thin bar is new. Its unit and render tests pass, and the type-check and `claude plugin validate` are clean. I watched it in an interactive Claude Code session inside tmux, on a scratch repository, through the creating, executing (two tasks in review) and finished states at 100, 80 and 50 columns. The `[-]` sat on the bar's row, and the band needed no row of padding above the bar. That run drew a 55-character bar with `▂`. After I let the bar fill the window, I read the row at 200, 150, 100, 80 and 60 columns: the bar grew with the window, the percent started one character after it each time, and six characters separated the percent from the `[-]`. I then switched it to `━` with half-line gaps and saw the new bar come up after `/reload-plugins`, but I haven't compared it with the design's bar. tmux drew the colors from the 256-color palette, so I haven't seen the exact theme colors. At 22 columns the bar gives way to the count, and the label wraps onto a second line. Before that change, the terminal band, the Desktop's dark-theme SVG bar and the arming on a Team organization account had each been seen working: the first two in a scratch repository, the third in a work profile. The typed-ref and branch-fallback logic has unit tests and headless runs in a real repository, and I haven't yet watched it in a live session. I haven't seen the Desktop's non-dark bar, or the new arming signals in the Desktop app. The Desktop's dark-theme bar that I saw working was the earlier one, with the track and the pill. The new one, with thin segments in three rows, has unit and render tests, and I haven't type-checked it or seen it in the Desktop app. I haven't checked whether the app centers the 6-pixel bar on the percent's line, or how it sets the 12 pixels before the percent.
+
+The checklist reader is new. Its unit tests pass, and the type-check and `claude plugin validate` are clean. I wrote it from the format in Fathom's `memory/checklist.md` and wrote the test text by hand to match it, so no line in the tests comes from a real Fathom run. I watched the band follow checklists that a script wrote (`scripts/bench`), in a live Claude Code session in tmux where `bd` failed on every call, through a chain, a parallel run and a file that wasn't a checklist. A real Fathom run on a one-task issue in a scratch repository with no Beads wrote a checklist that reads as the format says, and the `fathom unavailable` line the band showed before the checklist existed went away once Fathom started working. I haven't watched the band's progress through a real run. Beads wins whenever `bd` returns an epic to follow. When only the branch names the issue and the branch's ref has no epic, `pickRun` can still return another issue's epic (one made since the invocation, or the latest open one), and the band then shows that run and not the branch's checklist. A ref you type avoids it, because a typed ref matches only its own epic. I haven't seen how Fathom writes the `Review` line on a checklist: the reader takes an id and a URL, as the format describes, and the band doesn't need it to draw.
 
 The scaffold band is new. Its tests pass, including ones that raise the real hooks and move the band from `resolve` through `create` to `done`, and the type-check and `claude plugin validate` are clean. The calls it reads come from one Linear run. In a terminal session I saw it end a Linear scaffold on `done, 3 issues made` with all four steps checked (this was before the redesign: the row now reads `Scaffold · Done, 3 issues made`, the steps carry dots, and the time is new), and the transcript shows that run made three issues and one earlier update, which the band didn't count. I haven't checked the steps before `done` by eye, or the Desktop app or cmux, so the yellow dot, the elapsed time, the Desktop layout and the three cmux icon names (`pencil`, `questionmark.circle` and `plus.circle`) are unchecked.
 

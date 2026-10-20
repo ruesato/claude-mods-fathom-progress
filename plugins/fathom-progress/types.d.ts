@@ -1,6 +1,8 @@
-// What one sub-task is doing. `waiting` is blocked behind its predecessor in the
-// chain; `next` is the one task bd ready offers. In review is not a task state:
-// it is an overlay for a done task whose bundle's review is open.
+// What one sub-task is doing. `waiting` is blocked behind a task it depends on; `next`
+// is a task with nothing left to wait for, which bd ready offers (or, in a checklist,
+// an open task whose deps are all done). Several tasks can be next or in progress at
+// once when a run goes in parallel. In review is not a task state: it is an overlay for
+// a done task whose bundle's review is open.
 export type TaskState = 'waiting' | 'next' | 'inProgress' | 'done'
 
 // What the plan document (.fathom/plans/<ref>.md) records about one review. Only a
@@ -50,6 +52,34 @@ export type RunTask = {
   isInReview: boolean
 }
 
+// One task line of a checklist file (.fathom/tasks/<ref>.md), the memory backend Fathom
+// uses when the base branch does not track beads. `number` is the task's permanent id,
+// the one `deps` name. `doneOn` and `hash` are on a closed task only, and `hash` may be
+// missing for a while: it is written after the commit and rides the next one.
+export type ChecklistTask = {
+  number: number
+  title: string
+  marker: 'open' | 'inProgress' | 'done'
+  deps: number[]
+  subIssue: string | null
+  doneOn: string | null
+  hash: string | null
+}
+
+// A checklist file read back as data. Every field is null or empty when the file does
+// not say it, so a file that is not a checklist reads as an empty one. `review` is the
+// Review line once it names an id; the placeholder Fathom writes before a review exists,
+// and the legacy `PR` line (a URL and no id), leave it null, and the latter is `pr`.
+export type Checklist = {
+  ref: string | null
+  title: string | null
+  issue: string | null
+  branch: string | null
+  review: PlanReview | null
+  pr: string | null
+  tasks: ChecklistTask[]
+}
+
 // Where a `/fathom:scaffold` run stands, worked out from the events a mod sees (the
 // tracker's MCP calls, the questions it asks, the turn ending), since scaffold records
 // nothing a mod can read. `resolving` is the lookups before the tracker is verified;
@@ -66,8 +96,9 @@ export type ScaffoldPhase = 'resolving' | 'drafting' | 'waiting' | 'creating' | 
 // is written after the last task. `executing` and `finished` carry every task, and the
 // issue's `title` when the plan document names one. `creating` has no title because the
 // plan is written after the tasks, and bd holds none: Fathom makes the epic with the bare
-// ref as its title. `unavailable` carries why bd could not be read, so the band can say
-// so instead of showing zeros.
+// ref as its title (a checklist carries its title, so one from a checklist may have it).
+// `unavailable` carries why neither bd nor a checklist could be read, so the band can
+// say so instead of showing zeros.
 export type Snapshot =
   | { kind: 'idle' }
   | { kind: 'starting' }
@@ -87,7 +118,7 @@ declare module 'claude-code' {
       // The issue refs the person typed after the Fathom command that armed the band,
       // upper-cased; empty when none, and again after the session ends.
       refs: string[]
-      // What the band draws, rebuilt from bd while armed.
+      // What the band draws, rebuilt from bd or the run's checklist while armed.
       snapshot: Snapshot
       // The person's toggle, like beads-status has.
       isHidden: boolean
