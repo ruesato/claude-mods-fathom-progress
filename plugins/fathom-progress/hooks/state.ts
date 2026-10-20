@@ -167,7 +167,7 @@ function inChainOrder(tasks: readonly Task[]): Task[] {
 }
 
 // Fathom titles a task `<issue ref>: <task title>`; the band already shows the ref.
-function shortTitle(title: string, ref: string): string {
+export function shortTitle(title: string, ref: string): string {
   const prefix = `${ref}: `
   const bare = title.startsWith(prefix) ? title.slice(prefix.length) : title
   return bare.replace(/\s+/g, ' ').trim()
@@ -176,7 +176,7 @@ function shortTitle(title: string, ref: string): string {
 // The sub-issue refs of every bundle whose review is recorded, while the plan is
 // not final. A single-review issue opens its review as the last step, so it has no
 // task to mark.
-function reviewedRefs(plan: Plan | null): Set<string> {
+export function reviewedRefs(plan: Plan | null): Set<string> {
   const refs = new Set<string>()
   if (plan === null || plan.isFinalized) return refs
   for (const bundle of plan.bundles) {

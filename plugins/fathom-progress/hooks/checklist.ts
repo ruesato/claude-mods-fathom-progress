@@ -1,4 +1,5 @@
-import type { Checklist, ChecklistTask } from '../types'
+import type { Checklist, ChecklistTask, Plan, RunTask, Snapshot, TaskState } from '../types'
+import { reviewedRefs, shortTitle } from './state'
 
 // The checklist file at .fathom/tasks/<ref>.md, read back as data: the memory backend
 // Fathom uses when the base branch does not track beads (memory/checklist.md in the
@@ -113,4 +114,59 @@ export function parseChecklist(text: string): Checklist {
 
   checklist.tasks.sort((a, b) => a.number - b.number)
   return checklist
+}
+
+// A closed task is done, a claimed one is in progress, and an open one is next when every
+// task it depends on is closed, else it waits. Several tasks can be next at once and
+// several in progress, which is how a parallel run reads. A dependency on a task the file
+// does not list is met, as in the beads reader: one lost line must not stall the run.
+function stateOf(task: ChecklistTask, tasks: readonly ChecklistTask[]): TaskState {
+  if (task.marker === 'done') return 'done'
+  if (task.marker === 'inProgress') return 'inProgress'
+  const isMet = (n: number) => {
+    const dep = tasks.find(t => t.number === n)
+    return dep === undefined || dep.marker === 'done'
+  }
+  return task.deps.every(isMet) ? 'next' : 'waiting'
+}
+
+// The snapshot for a checklist run, the counterpart of `toSnapshot` for beads. `ref` is
+// the issue the band follows. A checklist has no epic to tell when the tasks are all made,
+// so the plan document stands in as it does for beads: it is written after the last task,
+// and until it exists a run whose tasks are all still open is being created.
+//
+// - A file that names no issue and holds no task is not a checklist at all: unavailable,
+//   with the reason, not an empty run.
+// - A checklist with a header and no task yet is a run being created.
+export function toChecklistSnapshot(input: { ref: string; checklist: Checklist; plan: Plan | null }): Snapshot {
+  const { ref, checklist, plan } = input
+  const { tasks } = checklist
+
+  if (tasks.length === 0) {
+    return checklist.ref === null
+      ? { kind: 'unavailable', reason: `.fathom/tasks/${ref}.md is not a Fathom checklist` }
+      : { kind: 'creating', ref, created: 0 }
+  }
+  if (plan === null && tasks.every(t => t.marker === 'open')) {
+    return { kind: 'creating', ref, created: tasks.length }
+  }
+
+  const reviewed = reviewedRefs(plan)
+  const run: RunTask[] = tasks.map(t => {
+    const state = stateOf(t, tasks)
+    return {
+      id: String(t.number),
+      ref: t.subIssue,
+      title: shortTitle(t.title, ref),
+      state,
+      isInReview: state === 'done' && t.subIssue !== null && reviewed.has(t.subIssue),
+    }
+  })
+
+  // The checklist's own header is the freshest title; the plan's heading is the fallback.
+  const name = checklist.title ?? plan?.title
+  const title = name ? { title: name } : {}
+  const isFinished = run.every(t => t.state === 'done')
+  if (isFinished) return { kind: 'finished', ref, ...title, tasks: run.map(t => ({ ...t, isInReview: false })) }
+  return { kind: 'executing', ref, ...title, tasks: run }
 }

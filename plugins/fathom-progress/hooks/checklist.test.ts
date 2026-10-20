@@ -1,6 +1,8 @@
 import { test, expect } from 'claude-code/testing'
 
-import { parseChecklist } from './checklist'
+import type { Plan, Snapshot } from '../types'
+import { parseChecklist, toChecklistSnapshot } from './checklist'
+import { parsePlan } from './plan'
 
 // The example memory/checklist.md in the Fathom skill gives, line for line.
 const EXAMPLE = [
@@ -193,4 +195,118 @@ test('text that is not a checklist reads as an empty one', async () => {
 
 test('Windows line endings read the same as Unix ones', async () => {
   expect(parseChecklist(EXAMPLE.replace(/\n/g, '\r\n'))).toEqual(parseChecklist(EXAMPLE))
+})
+
+// A checklist with the given task lines, under the header every file has.
+function listOf(...tasks: string[]): string {
+  return ['# ONC-5: Add login flow', '', '## Tasks', ...tasks].join('\n')
+}
+
+// The snapshot of a checklist, with the plan document's presence as the lifecycle sees it.
+function snapshotOf(text: string, plan: Plan | null = parsePlan('- Ref: ONC-5\n')): Snapshot {
+  return toChecklistSnapshot({ ref: 'ONC-5', checklist: parseChecklist(text), plan })
+}
+
+function tasksOf(snapshot: Snapshot) {
+  if (!('tasks' in snapshot)) throw new Error(`snapshot has no tasks: ${snapshot.kind}`)
+  return snapshot.tasks
+}
+
+test('a run in a line: done, in progress, then the rest waiting behind it', async () => {
+  const snapshot = snapshotOf(
+    listOf('- [x] 1. One (done 2026-10-20)', '- [>] 2. Two (deps: 1)', '- [ ] 3. Three (deps: 2)'),
+  )
+
+  expect(snapshot.kind).toBe('executing')
+  expect(tasksOf(snapshot).map(t => t.state)).toEqual(['done', 'inProgress', 'waiting'])
+})
+
+test('the open task whose dependencies are all closed is next', async () => {
+  const snapshot = snapshotOf(listOf('- [x] 1. One', '- [x] 2. Two', '- [ ] 3. Three (deps: 1, 2)', '- [ ] 4. Four (deps: 3)'))
+
+  expect(tasksOf(snapshot).map(t => t.state)).toEqual(['done', 'done', 'next', 'waiting'])
+})
+
+test('a task with no dependencies is next, and so is every other such task: they can run together', async () => {
+  const snapshot = snapshotOf(listOf('- [ ] 1. One', '- [ ] 2. Two', '- [ ] 3. Three (deps: 1, 2)'))
+
+  expect(tasksOf(snapshot).map(t => t.state)).toEqual(['next', 'next', 'waiting'])
+})
+
+test('a parallel run: several in progress at once, and the task behind them waits', async () => {
+  const snapshot = snapshotOf(listOf('- [>] 1. One', '- [>] 2. Two', '- [ ] 3. Three (deps: 1, 2)'))
+
+  expect(tasksOf(snapshot).map(t => t.state)).toEqual(['inProgress', 'inProgress', 'waiting'])
+})
+
+test('a dependency on a task the file does not list is met, so one lost line does not stall the run', async () => {
+  const snapshot = snapshotOf(listOf('- [ ] 2. Two (deps: 1)'))
+
+  expect(tasksOf(snapshot).map(t => t.state)).toEqual(['next'])
+})
+
+test('with every task closed the run is finished, and it shows no review marks', async () => {
+  const plan = parsePlan(
+    ['- Ref: ONC-5', '- Bundle 1/1: feat/onc-5-a - ONC-6', '- Review: 7 https://x.test/pull/7 (bundle 1/1)'].join('\n'),
+  )
+  const snapshot = snapshotOf(listOf('- [x] 1. One -> sub-issue: ONC-6 (done 2026-10-20, a1b2c3d)'), plan)
+
+  expect(snapshot.kind).toBe('finished')
+  expect(tasksOf(snapshot).map(t => t.isInReview)).toEqual([false])
+})
+
+test('a done task is in review while its bundle has a recorded review and the run goes on', async () => {
+  const plan = parsePlan(
+    [
+      '- Ref: ONC-5',
+      '- Bundle 1/2: feat/onc-5-a - ONC-6',
+      '- Review: 7 https://x.test/pull/7 (bundle 1/2)',
+      '- Bundle 2/2: feat/onc-5-b - ONC-7',
+    ].join('\n'),
+  )
+  const snapshot = snapshotOf(listOf('- [x] 1. One -> sub-issue: ONC-6', '- [>] 2. Two -> sub-issue: ONC-7'), plan)
+
+  expect(tasksOf(snapshot).map(t => t.isInReview)).toEqual([true, false])
+})
+
+test('tasks made but no plan document yet is a run being created, and counts the tasks', async () => {
+  expect(snapshotOf(listOf('- [ ] 1. One', '- [ ] 2. Two'), null)).toEqual({ kind: 'creating', ref: 'ONC-5', created: 2 })
+})
+
+test('once the plan document exists the run is executing, whatever the markers', async () => {
+  const snapshot = snapshotOf(listOf('- [ ] 1. One', '- [ ] 2. Two (deps: 1)'))
+
+  expect(snapshot.kind).toBe('executing')
+  expect(tasksOf(snapshot).map(t => t.state)).toEqual(['next', 'waiting'])
+})
+
+test('a claimed task starts the run even with no plan document', async () => {
+  expect(snapshotOf(listOf('- [>] 1. One', '- [ ] 2. Two (deps: 1)'), null).kind).toBe('executing')
+})
+
+test('a checklist with a header and no task yet is a run being created, with none made', async () => {
+  expect(snapshotOf('# ONC-5: Add login flow\n\n## Tasks\n')).toEqual({ kind: 'creating', ref: 'ONC-5', created: 0 })
+})
+
+test('a file that is not a checklist is unavailable and says so, never an empty run', async () => {
+  for (const text of ['', 'hello', '## Tasks\n- [ ] x\n']) {
+    const snapshot = snapshotOf(text)
+
+    expect(snapshot.kind).toBe('unavailable')
+    expect('reason' in snapshot && snapshot.reason).toContain('.fathom/tasks/ONC-5.md')
+  }
+})
+
+test("the title is the checklist header's, then the plan document's, and may be absent", async () => {
+  const plan = parsePlan('# ONC-5: The plan title\n- Ref: ONC-5\n')
+
+  expect(snapshotOf(listOf('- [ ] 1. One'), plan)).toMatchObject({ title: 'Add login flow' })
+  expect(snapshotOf('# ONC-5\n\n## Tasks\n- [ ] 1. One', plan)).toMatchObject({ title: 'The plan title' })
+  expect('title' in snapshotOf('# ONC-5\n\n## Tasks\n- [ ] 1. One')).toBe(false)
+})
+
+test('a task is titled without the issue ref in front, and carries its number and sub-issue', async () => {
+  const task = tasksOf(snapshotOf(listOf('- [ ] 7. ONC-5: Wire auth API -> sub-issue: ONC-9')))[0]
+
+  expect(task).toEqual({ id: '7', ref: 'ONC-9', title: 'Wire auth API', state: 'next', isInReview: false })
 })
