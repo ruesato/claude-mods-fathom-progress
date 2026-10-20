@@ -1,6 +1,8 @@
-// What one sub-task is doing. `waiting` is blocked behind its predecessor in the
-// chain; `next` is the one task bd ready offers. In review is not a task state:
-// it is an overlay for a done task whose bundle's review is open.
+// What one sub-task is doing. `waiting` is blocked behind a task it depends on; `next`
+// is a task with nothing left to wait for, which bd ready offers (or, in a checklist,
+// an open task whose deps are all done). Several tasks can be next or in progress at
+// once when a run goes in parallel. In review is not a task state: it is an overlay for
+// a done task whose bundle's review is open.
 export type TaskState = 'waiting' | 'next' | 'inProgress' | 'done'
 
 // What the plan document (.fathom/plans/<ref>.md) records about one review. Only a
@@ -94,8 +96,9 @@ export type ScaffoldPhase = 'resolving' | 'drafting' | 'waiting' | 'creating' | 
 // is written after the last task. `executing` and `finished` carry every task, and the
 // issue's `title` when the plan document names one. `creating` has no title because the
 // plan is written after the tasks, and bd holds none: Fathom makes the epic with the bare
-// ref as its title. `unavailable` carries why bd could not be read, so the band can say
-// so instead of showing zeros.
+// ref as its title (a checklist carries its title, so one from a checklist may have it).
+// `unavailable` carries why neither bd nor a checklist could be read, so the band can
+// say so instead of showing zeros.
 export type Snapshot =
   | { kind: 'idle' }
   | { kind: 'starting' }
@@ -115,7 +118,7 @@ declare module 'claude-code' {
       // The issue refs the person typed after the Fathom command that armed the band,
       // upper-cased; empty when none, and again after the session ends.
       refs: string[]
-      // What the band draws, rebuilt from bd while armed.
+      // What the band draws, rebuilt from bd or the run's checklist while armed.
       snapshot: Snapshot
       // The person's toggle, like beads-status has.
       isHidden: boolean
