@@ -126,7 +126,7 @@ export function advance(state: ScaffoldState, event: ScaffoldEvent): ScaffoldSta
 
 // The steps the band lists, in order. `waiting` is not a step: the run is waiting on the
 // person inside the draft step.
-export const STEPS = ['resolve', 'draft', 'create', 'done'] as const
+export const STEPS = ['Resolve', 'Draft', 'Create', 'Done'] as const
 
 // Which step the phase is in.
 export function stepOf(phase: ScaffoldPhase): number {
@@ -137,15 +137,15 @@ export function stepOf(phase: ScaffoldPhase): number {
 export function phaseText(state: ScaffoldState): string {
   switch (state.phase) {
     case 'resolving':
-      return 'checking the tracker'
+      return 'Checking the tracker'
     case 'drafting':
-      return 'drafting the issues'
+      return 'Drafting the issues'
     case 'waiting':
-      return 'waiting on you'
+      return 'Waiting on you'
     case 'creating':
-      return state.created === 0 ? 'creating issues' : `creating, ${issues(state.created)} made`
+      return state.created === 0 ? 'Creating issues' : `Creating, ${issues(state.created)} made`
     case 'done':
-      return state.created === 0 ? 'done' : `done, ${issues(state.created)} made`
+      return state.created === 0 ? 'Done' : `Done, ${issues(state.created)} made`
   }
 }
 
@@ -153,13 +153,43 @@ export function issues(count: number): string {
   return `${count} issue${count === 1 ? '' : 's'}`
 }
 
-// The steps as one line, so the state never rests on color: a check before each finished
-// step, an arrow before the current one, and nothing before those to come. A finished run
-// has every step checked.
-export function stepsText(phase: ScaffoldPhase): string {
+// The steps as pieces of one line, so the state never rests on color: a filled circle
+// before each finished step, an outlined one before the current step, and nothing before
+// those to come. A finished run has every step filled. The marks are pieces of their own so
+// the band can color them (green and the band's color, as the design does); the rest of the
+// line is dim.
+export const DONE_MARK = '\u25cf'
+export const CURRENT_MARK = '\u25cb'
+
+export type StepPart = { text: string; mark: 'done' | 'current' | null }
+
+// Each step with its mark, or none for a step to come.
+export function stepMarks(phase: ScaffoldPhase): { label: string; mark: 'done' | 'current' | null }[] {
   const current = stepOf(phase)
-  return STEPS.map((step, i) => {
-    if (phase === 'done' || i < current) return `✓ ${step}`
-    return i === current ? `▸ ${step}` : step
-  }).join('  ')
+  return STEPS.map((label, i) => ({ label, mark: phase === 'done' || i < current ? 'done' : i === current ? 'current' : null }))
+}
+
+export function stepParts(phase: ScaffoldPhase): StepPart[] {
+  return stepMarks(phase).flatMap(({ label, mark }, i): StepPart[] => {
+    const gap: StepPart[] = i === 0 ? [] : [{ text: '  ', mark: null }]
+    if (mark === null) return [...gap, { text: label, mark: null }]
+    return [...gap, { text: mark === 'done' ? DONE_MARK : CURRENT_MARK, mark }, { text: ` ${label}`, mark: null }]
+  })
+}
+
+export function stepsText(phase: ScaffoldPhase): string {
+  return stepParts(phase)
+    .map(part => part.text)
+    .join('')
+}
+
+// How long the run has gone on, as the band says it: `37s`, `3m 55s`, `1h 2m`. Whole
+// seconds, rounded down; nothing under a second reads as `0s`.
+export function elapsedText(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000))
+  const hours = Math.floor(total / 3600)
+  const minutes = Math.floor((total % 3600) / 60)
+  const seconds = total % 60
+  if (hours > 0) return `${hours}h ${minutes}m`
+  return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`
 }

@@ -19,6 +19,8 @@ export type Palette = {
   // A task that is done and whose review is open.
   review: string
   done: string
+  // The band's own color: the ring marking the current step of a scaffold run.
+  claude: string
 }
 
 // Values from the Figma collection, checked against what a terminal rendered for the dark
@@ -31,6 +33,7 @@ export const DARK: Palette = {
   inProgress: '#FFC107',
   review: '#D77757',
   done: '#4EBA65',
+  claude: '#D77757',
 }
 
 // The palette for the person's theme, or null for a theme this has no colors for. The
@@ -125,4 +128,25 @@ export function growingSvg(made: number, { palette, width, trail }: { palette: P
   const tasks: RunTask[] = Array.from({ length: Math.max(0, made) }, (_, i) => ({ id: `made-${i}`, ref: null, title: '', state: 'waiting', isInReview: false }))
   const alt = made === 0 ? 'no tasks made yet' : `${made} task${made === 1 ? '' : 's'} made so far`
   return barSvg(tasks, { palette, width, trail, alt })
+}
+
+// The scaffold band's marks, as the design draws them: a circle 9px across. The current step
+// is a ring, 2px thick inside the 9px, in the band's color; a finished step and the waiting
+// dot are the same circle filled. A terminal cell cannot draw a ring, so the terminal uses
+// `○` and `●`; this is the desktop's.
+export const MARK_PX = 9
+const MARK_STROKE = 2
+
+export type Mark = 'done' | 'current' | 'waiting'
+
+const MARK_ALT: Record<Mark, string> = { done: 'done', current: 'current step', waiting: 'waiting on you' }
+
+export function markSvg(mark: Mark, { palette }: { palette: Palette }): { source: string; alt: string; width: number; height: number } {
+  const half = MARK_PX / 2
+  const circle =
+    mark === 'current'
+      ? `<circle cx="${half}" cy="${half}" r="${half - MARK_STROKE / 2}" fill="none" stroke="${palette.claude}" stroke-width="${MARK_STROKE}"/>`
+      : `<circle cx="${half}" cy="${half}" r="${half}" fill="${mark === 'done' ? palette.done : palette.inProgress}"/>`
+  const source = `<svg xmlns="http://www.w3.org/2000/svg" width="${MARK_PX}" height="${MARK_PX}" viewBox="0 0 ${MARK_PX} ${MARK_PX}">${circle}</svg>`
+  return { source, alt: MARK_ALT[mark], width: MARK_PX, height: MARK_PX }
 }

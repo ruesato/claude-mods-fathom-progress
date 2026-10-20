@@ -1,6 +1,6 @@
 import { test, expect } from 'claude-code/testing'
 
-import { advance, callEvent, inputOf, isCreate, isPreflight, phaseText, resultEvent, startScaffold, stepsText } from './scaffold'
+import { advance, callEvent, elapsedText, inputOf, isCreate, isPreflight, phaseText, resultEvent, startScaffold, stepParts, stepsText } from './scaffold'
 import type { ScaffoldEvent, ScaffoldState } from './scaffold'
 
 const LINEAR = 'mcp__linear-server__'
@@ -153,22 +153,22 @@ test('an event that changes nothing returns the same state', async () => {
 })
 
 test('the label says what the run is doing, with the issues made so far', async () => {
-  expect(phaseText({ kind: 'scaffold', phase: 'resolving', created: 0 })).toBe('checking the tracker')
-  expect(phaseText({ kind: 'scaffold', phase: 'drafting', created: 0 })).toBe('drafting the issues')
-  expect(phaseText({ kind: 'scaffold', phase: 'waiting', created: 0 })).toBe('waiting on you')
-  expect(phaseText({ kind: 'scaffold', phase: 'creating', created: 0 })).toBe('creating issues')
-  expect(phaseText({ kind: 'scaffold', phase: 'creating', created: 1 })).toBe('creating, 1 issue made')
-  expect(phaseText({ kind: 'scaffold', phase: 'creating', created: 3 })).toBe('creating, 3 issues made')
-  expect(phaseText({ kind: 'scaffold', phase: 'done', created: 5 })).toBe('done, 5 issues made')
-  expect(phaseText({ kind: 'scaffold', phase: 'done', created: 0 })).toBe('done')
+  expect(phaseText({ kind: 'scaffold', phase: 'resolving', created: 0 })).toBe('Checking the tracker')
+  expect(phaseText({ kind: 'scaffold', phase: 'drafting', created: 0 })).toBe('Drafting the issues')
+  expect(phaseText({ kind: 'scaffold', phase: 'waiting', created: 0 })).toBe('Waiting on you')
+  expect(phaseText({ kind: 'scaffold', phase: 'creating', created: 0 })).toBe('Creating issues')
+  expect(phaseText({ kind: 'scaffold', phase: 'creating', created: 1 })).toBe('Creating, 1 issue made')
+  expect(phaseText({ kind: 'scaffold', phase: 'creating', created: 3 })).toBe('Creating, 3 issues made')
+  expect(phaseText({ kind: 'scaffold', phase: 'done', created: 5 })).toBe('Done, 5 issues made')
+  expect(phaseText({ kind: 'scaffold', phase: 'done', created: 0 })).toBe('Done')
 })
 
-test('the steps line checks what is finished and points at the current step, with waiting inside the draft', async () => {
-  expect(stepsText('resolving')).toBe('▸ resolve  draft  create  done')
-  expect(stepsText('drafting')).toBe('✓ resolve  ▸ draft  create  done')
-  expect(stepsText('waiting')).toBe('✓ resolve  ▸ draft  create  done')
-  expect(stepsText('creating')).toBe('✓ resolve  ✓ draft  ▸ create  done')
-  expect(stepsText('done')).toBe('✓ resolve  ✓ draft  ✓ create  ✓ done')
+test('the steps line fills a circle before what is finished and outlines the current step, with waiting inside the draft', async () => {
+  expect(stepsText('resolving')).toBe('○ Resolve  Draft  Create  Done')
+  expect(stepsText('drafting')).toBe('● Resolve  ○ Draft  Create  Done')
+  expect(stepsText('waiting')).toBe('● Resolve  ○ Draft  Create  Done')
+  expect(stepsText('creating')).toBe('● Resolve  ● Draft  ○ Create  Done')
+  expect(stepsText('done')).toBe('● Resolve  ● Draft  ● Create  ● Done')
 })
 
 test('a tool.call event becomes a call event with the engine\'s own fields taken off', async () => {
@@ -189,4 +189,27 @@ test('a result is an error when the tool said so or the engine refused the call,
 test('a create refused by the engine is not counted', async () => {
   const asked = run([callEvent(`${LINEAR}save_issue`, MAIN)])
   expect(advance(asked, resultEvent(`${LINEAR}save_issue`, MAIN, { deny: 'blocked' })).created).toBe(0)
+})
+
+test('the marks are pieces of their own, one cell wide, so the band can color them: filled for done, outlined for the current step', async () => {
+  const marks = (phase: Parameters<typeof stepParts>[0]) => stepParts(phase).filter(part => part.mark !== null)
+  expect(marks('creating')).toEqual([
+    { text: '\u25cf', mark: 'done' },
+    { text: '\u25cf', mark: 'done' },
+    { text: '\u25cb', mark: 'current' },
+  ])
+  expect(marks('resolving')).toEqual([{ text: '\u25cb', mark: 'current' }])
+  expect(marks('waiting').map(part => part.mark)).toEqual(['done', 'current'])
+  expect(marks('done').map(part => part.mark)).toEqual(['done', 'done', 'done', 'done'])
+})
+
+test('the elapsed time reads in seconds, then minutes and seconds, then hours and minutes', async () => {
+  expect(elapsedText(0)).toBe('0s')
+  expect(elapsedText(999)).toBe('0s')
+  expect(elapsedText(37_000)).toBe('37s')
+  expect(elapsedText(60_000)).toBe('1m 0s')
+  expect(elapsedText(235_900)).toBe('3m 55s')
+  expect(elapsedText(3_600_000)).toBe('1h 0m')
+  expect(elapsedText(3_725_000)).toBe('1h 2m')
+  expect(elapsedText(-5)).toBe('0s')
 })

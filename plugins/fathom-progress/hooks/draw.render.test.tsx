@@ -96,9 +96,10 @@ function barRuns(node: unknown): { text: string; color: unknown }[] {
 function band($: Engine, on: On) {
   let current: Snapshot = { kind: 'idle' }
   let palette: Palette | null = null
+  let elapsedMs: number | null = null
   let isNull = false
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    const tree = drawBand($.ui.resolve(e), e.props.bodyColumns, current, { surface: e.surface, palette })
+    const tree = drawBand($.ui.resolve(e), e.props.bodyColumns, current, { surface: e.surface, palette, elapsedMs })
     isNull = tree === null
     return tree ?? next(e)
   })
@@ -107,9 +108,10 @@ function band($: Engine, on: On) {
   // the percent, the title row (the dot, the label and the reviews open), and the line beneath.
   return {
     wasNull: () => isNull,
-    async show(snapshot: Snapshot, surface: Surface, bodyColumns = 80, withPalette: Palette | null = null) {
+    async show(snapshot: Snapshot, surface: Surface, bodyColumns = 80, withPalette: Palette | null = null, withElapsedMs: number | null = null) {
       current = snapshot
       palette = withPalette
+      elapsedMs = withElapsedMs
       const ui = await $.ui.mount({
         plugin: 'fathom-progress',
         surface,
@@ -241,12 +243,12 @@ const SCAFFOLD = (phase: 'resolving' | 'drafting' | 'waiting' | 'creating' | 'do
 test('a scaffold is two rows on both surfaces: the dot and what the run is doing, then the steps with the finished ones checked', async ($, on) => {
   const { show } = band($, on)
   const frames: [Snapshot, string, string][] = [
-    [SCAFFOLD('resolving'), '●scaffold · checking the tracker', '▸ resolve  draft  create  done'],
-    [SCAFFOLD('drafting'), '●scaffold · drafting the issues', '✓ resolve  ▸ draft  create  done'],
-    [SCAFFOLD('waiting'), '●scaffold · waiting on you', '✓ resolve  ▸ draft  create  done'],
-    [SCAFFOLD('creating', 0), '●scaffold · creating issues', '✓ resolve  ✓ draft  ▸ create  done'],
-    [SCAFFOLD('creating', 3), '●scaffold · creating, 3 issues made', '✓ resolve  ✓ draft  ▸ create  done'],
-    [SCAFFOLD('done', 5), '●scaffold · done, 5 issues made', '✓ resolve  ✓ draft  ✓ create  ✓ done'],
+    [SCAFFOLD('resolving'), 'Scaffold · Checking the tracker', '○ Resolve  Draft  Create  Done'],
+    [SCAFFOLD('drafting'), 'Scaffold · Drafting the issues', '● Resolve  ○ Draft  Create  Done'],
+    [SCAFFOLD('waiting'), 'Scaffold · ● Waiting on you', '● Resolve  ○ Draft  Create  Done'],
+    [SCAFFOLD('creating', 0), 'Scaffold · Creating issues', '● Resolve  ● Draft  ○ Create  Done'],
+    [SCAFFOLD('creating', 3), 'Scaffold · Creating, 3 issues made', '● Resolve  ● Draft  ○ Create  Done'],
+    [SCAFFOLD('done', 5), 'Scaffold · Done, 5 issues made', '● Resolve  ● Draft  ● Create  ● Done'],
   ]
   for (const surface of ['terminal', 'desktop'] as const) {
     for (const [snapshot, label, steps] of frames) {
@@ -271,19 +273,111 @@ test('a scaffold on the desktop has a row of padding above it for the engine\'s 
   await terminal.ui.unmount()
 })
 
-test('the scaffold dot is yellow while waiting on the person, green when done, and the band\'s color otherwise', async ($, on) => {
+// The colors of the pieces of text under a node that read `text`, in drawing order.
+function colorsOf(node: unknown, text: string): (string | undefined)[] {
+  const n = node as { type?: string; props?: { color?: string }; children?: unknown[] } | string | null
+  if (!n || typeof n === 'string') return []
+  const own = n.type === 'Text' && textOf(n as Node) === text ? [n.props?.color] : []
+  return [...own, ...(n.children ?? []).flatMap(c => colorsOf(c, text))]
+}
+
+test('the steps are marked with a green filled circle when finished and an outlined one in the band\'s color for the current step, on both surfaces', async ($, on) => {
   const { show } = band($, on)
-  const colorOfDot = async (snapshot: Snapshot) => {
-    const { ui } = await show(snapshot, 'terminal')
-    const dot = await ui.find({ type: 'Text', text: '●' })
-    await ui.unmount()
-    return (dot as unknown as { props?: { color?: string } } | undefined)?.props?.color
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const running = await show(SCAFFOLD('creating', 1), surface)
+    expect(colorsOf(running.tree, '\u25cb')).toEqual(['claude'])
+    expect(colorsOf(running.tree, '\u25cf')).toEqual(['success', 'success'])
+    await running.ui.unmount()
+    const done = await show(SCAFFOLD('done', 5), surface)
+    expect(colorsOf(done.tree, '\u25cb')).toEqual([])
+    expect(colorsOf(done.tree, '\u25cf')).toEqual(['success', 'success', 'success', 'success'])
+    await done.ui.unmount()
   }
-  expect(await colorOfDot(SCAFFOLD('resolving'))).toBe('claude')
-  expect(await colorOfDot(SCAFFOLD('drafting'))).toBe('claude')
-  expect(await colorOfDot(SCAFFOLD('waiting'))).toBe('warning')
-  expect(await colorOfDot(SCAFFOLD('creating', 2))).toBe('claude')
-  expect(await colorOfDot(SCAFFOLD('done', 5))).toBe('success')
+})
+
+test('only waiting on you has an icon on the first row, and it is yellow; the other phases have none', async ($, on) => {
+  const { show } = band($, on)
+  for (const surface of ['terminal', 'desktop'] as const) {
+    for (const phase of ['resolving', 'drafting', 'waiting', 'creating', 'done'] as const) {
+      const { ui, head } = await show(SCAFFOLD(phase, 2), surface)
+      const icon = head.includes('\u25cf')
+      expect(icon).toBe(phase === 'waiting')
+      expect(head.startsWith('Scaffold \u00b7 ')).toBe(true)
+      await ui.unmount()
+    }
+    const waiting = await show(SCAFFOLD('waiting'), surface)
+    expect(colorsOf(waiting.tree?.children?.[0], '\u25cf ')).toEqual(['warning'])
+    await waiting.ui.unmount()
+  }
+})
+
+test('the first row ends with the time the run has gone on, dim, and has none when it is not known', async ($, on) => {
+  const { show } = band($, on)
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const known = await show(SCAFFOLD('waiting'), surface, 80, null, 235_000)
+    expect(known.head).toBe('Scaffold \u00b7 \u25cf Waiting on you (3m 55s)')
+    expect(colorsOf(known.tree, ' (3m 55s)')).toEqual([undefined])
+    await known.ui.unmount()
+    const unknown = await show(SCAFFOLD('done', 5), surface, 80, null, null)
+    expect(unknown.head).toBe('Scaffold \u00b7 Done, 5 issues made')
+    await unknown.ui.unmount()
+  }
+})
+
+test('the first row\'s words and the steps start with a capital', async ($, on) => {
+  const { show } = band($, on)
+  const { ui, head, title } = await show(SCAFFOLD('drafting'), 'terminal')
+  expect(head).toBe('Scaffold \u00b7 Drafting the issues')
+  expect(title).toBe('\u25cf Resolve  \u25cb Draft  Create  Done')
+  await ui.unmount()
+})
+
+// The Svg elements under a node, in drawing order, as their markup.
+function svgsOf(node: unknown): string[] {
+  const n = node as { type?: string; props?: { source?: string }; children?: unknown[] } | string | null
+  if (!n || typeof n === 'string') return []
+  const own = n.type === 'Svg' && n.props?.source ? [n.props.source] : []
+  return [...own, ...(n.children ?? []).flatMap(svgsOf)]
+}
+
+test('on the desktop with a palette the marks are Svg circles: a ring for the current step, filled for finished ones and the waiting dot', async ($, on) => {
+  const { show } = band($, on)
+  const creating = await show(SCAFFOLD('creating', 3), 'desktop', 80, DARK)
+  const marks = svgsOf(creating.tree)
+  expect(marks).toHaveLength(3)
+  expect(marks.filter(m => m.includes('fill="none"'))).toHaveLength(1)
+  expect(marks.filter(m => m.includes(`fill="${DARK.done}"`))).toHaveLength(2)
+  // The glyphs are not drawn beside them, and the labels are.
+  expect(textOf(creating.tree as Node)).not.toMatch(/[\u25cb\u25cf]/)
+  expect(textOf(creating.tree as Node)).toContain('Create')
+  await creating.ui.unmount()
+
+  const waiting = await show(SCAFFOLD('waiting'), 'desktop', 80, DARK)
+  // One for the waiting dot on the first row, one for Resolve done, one for Draft current.
+  expect(svgsOf(waiting.tree)).toHaveLength(3)
+  expect(svgsOf(waiting.tree?.children?.[0])).toEqual([expect.stringContaining(`fill="${DARK.inProgress}"`)])
+  await waiting.ui.unmount()
+
+  const drafting = await show(SCAFFOLD('drafting'), 'desktop', 80, DARK)
+  expect(svgsOf(drafting.tree?.children?.[0])).toEqual([])
+  await drafting.ui.unmount()
+
+  const done = await show(SCAFFOLD('done', 5), 'desktop', 80, DARK)
+  expect(svgsOf(done.tree).filter(m => m.includes('fill="none"'))).toEqual([])
+  expect(svgsOf(done.tree)).toHaveLength(4)
+  await done.ui.unmount()
+})
+
+test('with no palette, and on the terminal, the marks are the glyphs, whatever the palette', async ($, on) => {
+  const { show } = band($, on)
+  const bare = await show(SCAFFOLD('creating', 3), 'desktop', 80, null)
+  expect(svgsOf(bare.tree)).toEqual([])
+  expect(bare.title).toBe('\u25cf Resolve  \u25cf Draft  \u25cb Create  Done')
+  await bare.ui.unmount()
+  const terminal = await show(SCAFFOLD('creating', 3), 'terminal', 80, DARK)
+  expect(svgsOf(terminal.tree)).toEqual([])
+  expect(terminal.title).toBe('\u25cf Resolve  \u25cf Draft  \u25cb Create  Done')
+  await terminal.ui.unmount()
 })
 
 test('a scaffold draws the same two rows at 50, 80 and 100 columns', async ($, on) => {
@@ -291,21 +385,25 @@ test('a scaffold draws the same two rows at 50, 80 and 100 columns', async ($, o
   for (const surface of ['terminal', 'desktop'] as const) {
     for (const columns of [50, 80, 100]) {
       const { ui, head, title, tree } = await show(SCAFFOLD('creating', 4), surface, columns)
-      expect(head).toBe('●scaffold · creating, 4 issues made')
-      expect(title).toBe('✓ resolve  ✓ draft  ▸ create  done')
+      expect(head).toBe('Scaffold · Creating, 4 issues made')
+      expect(title).toBe('● Resolve  ● Draft  ○ Create  Done')
       expect(tree?.children).toHaveLength(2)
       await ui.unmount()
     }
   }
 })
 
-test('a narrow window cuts the scaffold label and the steps instead of wrapping them', async ($, on) => {
+test('a narrow window drops the time first, then cuts the scaffold phase, instead of wrapping them', async ($, on) => {
   const { show } = band($, on)
-  const { ui, head, title } = await show(SCAFFOLD('creating', 12), 'terminal', 24)
-  // 24 columns less the cell of padding and the dot with its gap leaves 21 for the label.
-  expect(head.length).toBeLessThanOrEqual(1 + 21)
-  expect(head.endsWith('…')).toBe(true)
-  expect(head.startsWith('●scaffold · creating')).toBe(true)
+  const tight = await show(SCAFFOLD('creating', 12), 'terminal', 40, null, 322_000)
+  // 40 columns less the cell of padding is 39: the phase fits (`Scaffold · Creating, 12 issues made`
+  // is 35) but the time after it does not.
+  expect(tight.head).toBe('Scaffold \u00b7 Creating, 12 issues made')
+  await tight.ui.unmount()
+  const { ui, head, title } = await show(SCAFFOLD('creating', 12), 'terminal', 24, null, 322_000)
+  expect(head.length).toBeLessThanOrEqual(24 - 1)
+  expect(head.endsWith('\u2026')).toBe(true)
+  expect(head.startsWith('Scaffold \u00b7 Creating')).toBe(true)
   expect(title.length).toBeGreaterThan(0)
   await ui.unmount()
 })

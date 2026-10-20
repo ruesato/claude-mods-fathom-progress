@@ -1,7 +1,7 @@
 import { test, expect } from 'claude-code/testing'
 
 import type { RunTask, TaskState } from '../types'
-import { BAR_HEIGHT, BAR_WIDTH, DARK, barSvg, desktopBarWidth, growingSvg, paletteFor } from './desktop'
+import { BAR_HEIGHT, BAR_WIDTH, DARK, MARK_PX, barSvg, desktopBarWidth, growingSvg, markSvg, paletteFor } from './desktop'
 import type { Palette } from './desktop'
 
 const run = (states: TaskState[], reviewed: number[] = []): RunTask[] =>
@@ -63,7 +63,7 @@ test('the alt text says what the colors say: how many are done, in review, and w
 })
 
 test('every color in the markup is one the palette was given, so nothing here names a color of its own', async () => {
-  const custom: Palette = { waiting: '#010101', next: '#020202', inProgress: '#030303', review: '#040404', done: '#050505' }
+  const custom: Palette = { waiting: '#010101', next: '#020202', inProgress: '#030303', review: '#040404', done: '#050505', claude: '#060606' }
   const allowed = new Set(Object.values(custom))
 
   for (const tasks of [PLANNED, EXECUTING, FINISHED]) {
@@ -147,4 +147,36 @@ test('while tasks are made the bar is one waiting segment for each, sharing the 
     ['355.33', '174.67'],
   ])
   expect([none.alt, one.alt, three.alt]).toEqual(['no tasks made yet', '1 task made so far', '3 tasks made so far'])
+})
+
+test('the current step is a ring 9px across with a 2px stroke inside it, in the band\'s color, and draws nothing else', async () => {
+  const { source, width, height } = markSvg('current', { palette: DARK })
+  expect([width, height]).toEqual([MARK_PX, MARK_PX])
+  expect(source.match(/<circle /g)).toHaveLength(1)
+  expect(source).toContain('fill="none"')
+  expect(source).toContain(`stroke="${DARK.claude}"`)
+  expect(source).toContain('stroke-width="2"')
+  // The stroke sits inside the 9px: the circle's own radius is 4.5 less half the stroke.
+  expect(source).toContain('r="3.5"')
+})
+
+test('a finished step and the waiting dot are the same circle filled, in their own colors', async () => {
+  const done = markSvg('done', { palette: DARK }).source
+  const waiting = markSvg('waiting', { palette: DARK }).source
+  expect(done).toContain(`fill="${DARK.done}"`)
+  expect(waiting).toContain(`fill="${DARK.inProgress}"`)
+  for (const source of [done, waiting]) {
+    expect(source).toContain('r="4.5"')
+    expect(source).not.toContain('stroke')
+  }
+})
+
+test('every color in a mark is one the palette was given', async () => {
+  const custom: Palette = { waiting: '#010101', next: '#020202', inProgress: '#030303', review: '#040404', done: '#050505', claude: '#060606' }
+  const allowed = new Set(Object.values(custom))
+  for (const mark of ['done', 'current', 'waiting'] as const) {
+    const used = markSvg(mark, { palette: custom }).source.match(/#[0-9A-Fa-f]{6}\b/g) ?? []
+    expect(used).toHaveLength(1)
+    expect(used.every(c => allowed.has(c))).toBe(true)
+  }
 })

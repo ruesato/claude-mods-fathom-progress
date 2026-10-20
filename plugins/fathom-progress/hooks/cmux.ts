@@ -82,11 +82,11 @@ export function cmuxEntries(snapshot: Snapshot): CmuxEntries {
       const { phase, created } = snapshot
       const made = created === 0 ? '' : `${issues(created)} made`
       const text = {
-        resolving: 'scaffold · checking tracker',
-        drafting: 'scaffold · drafting',
-        waiting: 'scaffold · waiting on you',
-        creating: `scaffold · ${made || 'creating'}`,
-        done: `scaffold · done${made ? `, ${made}` : ''}`,
+        resolving: 'Scaffold · Checking tracker',
+        drafting: 'Scaffold · Drafting',
+        waiting: 'Scaffold · Waiting on you',
+        creating: `Scaffold · ${made || 'Creating'}`,
+        done: `Scaffold · Done${made ? `, ${made}` : ''}`,
       }[phase]
       const style = {
         resolving: { icon: ICON.starting, color: COLOR.getting },

@@ -91,6 +91,9 @@ declare module 'claude-code' {
       snapshot: Snapshot
       // The person's toggle, like beads-status has.
       isHidden: boolean
+      // The time of the last tick, in ms, which a scaffold run's elapsed time is drawn from.
+      // It moves each second while a scaffold run is going, and that is what redraws the band.
+      tick: number
     }
   }
 }

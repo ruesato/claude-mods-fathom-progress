@@ -17,6 +17,14 @@ const armedAt = atom({ plugin: 'fathom-progress', key: 'armedAt' } as const, nul
 const armedRefs = atom({ plugin: 'fathom-progress', key: 'refs' } as const, [])
 const snapshot = atom({ plugin: 'fathom-progress', key: 'snapshot' } as const, { kind: 'idle' })
 const isHidden = atom({ plugin: 'fathom-progress', key: 'isHidden' } as const, false)
+const tick = atom({ plugin: 'fathom-progress', key: 'tick' } as const, 0)
+
+// When the scaffold run began and, once it is done, ended, in ms, for the time the band
+// shows. Kept here and not in the snapshot: it is not what the run is doing, and a module
+// that reloads loses it, which the band takes as an elapsed time it does not know and leaves
+// off. The tick moves each second while the run is going, which is what redraws the time.
+let scaffoldRun: { startedAt: number; endedAt: number | null } | null = null
+const TICK_MS = 1000
 
 async function bd($: EngineInterface, root: string, args: string[]): Promise<unknown> {
   return readBd(args[0] ?? '', await $.process.run(['bd', ...args], { cwd: root }))
@@ -208,6 +216,9 @@ function feedScaffold($: EngineInterface, event: ScaffoldEvent): void {
       if (current.kind !== 'scaffold') return
       const next = advance(current, event)
       if (next === current) return
+      if (next.phase === 'done' && scaffoldRun !== null && scaffoldRun.endedAt === null) {
+        scaffoldRun = { ...scaffoldRun, endedAt: await $.clock.now() }
+      }
       await update($, snapshot, () => next)
       void publish($)
     } catch (error) {
@@ -246,6 +257,8 @@ async function arm($: EngineInterface, start: 'execute' | 'scaffold' | null, via
     }
     return
   }
+  scaffoldRun = start === 'scaffold' ? { startedAt: now, endedAt: null } : null
+  await update($, tick, () => now)
   await update($, armedAt, () => (start === 'execute' ? now : null))
   await update($, armedRefs, () => [...refs])
   await update($, snapshot, () => snapshotOnStart(start))
@@ -260,6 +273,13 @@ export const register: Register = on => {
     // change, so it is not polled; the next invocation refreshes it.
     $.clock.every(POLL_MS, async () => {
       if ((await read($, snapshot)).kind !== 'finished') await refresh($)
+    })
+
+    // Moves the time a running scaffold shows. Nothing else is drawn from it.
+    $.clock.every(TICK_MS, async () => {
+      if (scaffoldRun === null || scaffoldRun.endedAt !== null) return
+      const now = await $.clock.now()
+      if ((await read($, snapshot)).kind === 'scaffold') await update($, tick, () => now)
     })
 
     // A taken name throws, and a hook that throws is skipped; register last.
@@ -278,6 +298,7 @@ export const register: Register = on => {
   // The module and its timer survive /clear (probed, claude-mods-fathom-5l2.2), and
   // session.start does not fire again, so the reset is here, for every reason.
   on('session.end', async ($, e, next) => {
+    scaffoldRun = null
     await update($, armedAt, () => null)
     await update($, armedRefs, () => [])
     await update($, snapshot, () => ({ kind: 'idle' }))
@@ -357,6 +378,10 @@ export const register: Register = on => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const current = await read($, snapshot)
     if (e.props.hasSurvey || current.kind === 'idle' || (await read($, isHidden))) return next(e)
-    return drawBand($.ui.resolve(e), e.props.bodyColumns, current, { surface: e.surface, palette: paletteFor(theme) }) ?? next(e)
+    // How long a scaffold run has gone on. The tick is read only for one, so no other band is
+    // redrawn by it.
+    const now = current.kind === 'scaffold' ? await read($, tick) : 0
+    const elapsedMs = current.kind === 'scaffold' && scaffoldRun !== null ? (scaffoldRun.endedAt ?? now) - scaffoldRun.startedAt : null
+    return drawBand($.ui.resolve(e), e.props.bodyColumns, current, { surface: e.surface, palette: paletteFor(theme), elapsedMs }) ?? next(e)
   })
 }

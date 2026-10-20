@@ -2,9 +2,9 @@ import type { EngineInterface } from 'claude-code'
 
 import type { RunTask, ScaffoldPhase, Snapshot } from '../types'
 import { allocate } from './bar'
-import { PERCENT_CELLS, PERCENT_GAP_PX, barSvg, desktopBarWidth, growingSvg } from './desktop'
+import { PERCENT_CELLS, PERCENT_GAP_PX, barSvg, desktopBarWidth, growingSvg, markSvg } from './desktop'
 import type { Palette } from './desktop'
-import { phaseText, stepsText } from './scaffold'
+import { elapsedText, phaseText, stepMarks, stepParts } from './scaffold'
 import type { ScaffoldState } from './scaffold'
 import { currentOf, progressOf } from './state'
 
@@ -307,7 +307,7 @@ function percentText(percent: number): string {
   return `${percent}%`.padStart(PERCENT_COLS)
 }
 
-// The terminal's line starts with this arrow. The desktop's frames draw none, so the lines
+// The terminal's execute line starts with this arrow. The desktop's frames draw none, so the lines
 // below are built without it.
 const ARROW = '▸ '
 
@@ -392,28 +392,109 @@ function drawTerminalLine(ui: Ui, text: string) {
   )
 }
 
-// A scaffold has no tasks to divide a bar by, so it is two rows, the same on both surfaces:
-// the dot and what the run is doing, then the steps as a dim line, with a check before the
-// ones finished and an arrow at the current one so no state rests on the dot's color alone.
-// The dot is yellow while the run waits on the person, green when done and the band's
-// own color otherwise. `pad`, `top` and `line` are the surface's: the terminal's rows start a
-// cell in, and the desktop's are flush, with a row above and the line indented past the dot.
-function scaffoldDot(phase: ScaffoldPhase): string {
-  return phase === 'waiting' ? LOOKS.inProgress.color : phase === 'done' ? LOOKS.done.color : 'claude'
+// A scaffold has no tasks to divide a bar by, so it is two rows, the same on both surfaces.
+// The first is `Scaffold ·`, what the run is doing, and how long it has gone on, dim. A
+// yellow dot comes before what the run is doing only while it waits on the person, the one
+// state that needs them. The second is the steps, dim: a green dot before each finished
+// one and an outlined circle, in the band's color, before the current one, so no state
+// rests on color alone. `pad` and `top` are the surface's: the terminal's rows start a cell
+// in, and the desktop's are flush, with a row above.
+const SCAFFOLD_TITLE = 'Scaffold \u00b7 '
+
+// The title as pieces that fit `columns`: the elapsed time goes first when the row is too
+// narrow for it, then the phase is cut with an ellipsis.
+export function scaffoldTitleParts(label: string, note: string, isWaiting: boolean, columns: number): { label: string; note: string } {
+  const room = columns - SCAFFOLD_TITLE.length - (isWaiting ? 2 : 0)
+  if (note !== '' && label.length + 1 + note.length <= room) return { label, note }
+  if (label.length <= room) return { label, note: '' }
+  return { label: room > 1 ? `${label.slice(0, room - 1).trimEnd()}\u2026` : '', note: '' }
 }
 
-function drawScaffold(ui: Ui, snapshot: ScaffoldState, { columns, pad, top, line }: { columns: number; pad: number; top?: number; line: (text: string) => ReturnType<typeof drawLine> }) {
-  const { Box } = ui
-  const label = titleParts(`scaffold · ${phaseText(snapshot)}`, '', '', columns - 2).label
+function drawScaffoldTitle(ui: Ui, snapshot: ScaffoldState, elapsedMs: number | null, columns: number, pad: number, palette: Palette | null) {
+  const { Box, Text } = ui
+  const isWaiting = snapshot.phase === 'waiting'
+  const { label, note } = scaffoldTitleParts(phaseText(snapshot), elapsedMs === null ? '' : `(${elapsedText(elapsedMs)})`, isWaiting, columns)
+  // Only the desktop's element table has Svg, and its colors are the palette's.
+  const Svg = palette && 'Svg' in ui ? ui.Svg : null
+  if (Svg && palette) {
+    // The pieces are laid out, a cell apart, and not spaced in the text: an Svg sits between them.
+    const dot = markSvg('waiting', { palette })
+    return (
+      <Box paddingLeft={pad} alignItems="center" columnGap={1}>
+        <Text>{SCAFFOLD_TITLE.trimEnd()}</Text>
+        {isWaiting ? <Svg source={dot.source} alt={dot.alt} width={dot.width} height={dot.height} /> : null}
+        <Text>{label}</Text>
+        {note ? <Text dimColor>{note}</Text> : null}
+      </Box>
+    )
+  }
   return (
-    <Box flexDirection="column" paddingTop={top}>
-      {drawTitle(ui, scaffoldDot(snapshot.phase), { label, note: '' }, pad)}
-      {line(stepsText(snapshot.phase))}
+    <Box paddingLeft={pad}>
+      <Text wrap="truncate-end">
+        <Text>{SCAFFOLD_TITLE}</Text>
+        {isWaiting ? <Text color={LOOKS.inProgress.color}>{'\u25cf '}</Text> : null}
+        <Text>{label}</Text>
+        {note ? <Text dimColor>{` ${note}`}</Text> : null}
+      </Text>
     </Box>
   )
 }
 
-function drawTerminal(ui: Ui, bodyColumns: number, snapshot: Exclude<Snapshot, { kind: 'idle' }>) {
+const STEP_COLOR = { done: LOOKS.done.color, current: 'claude' } as const
+
+function drawSteps(ui: Ui, phase: ScaffoldPhase, pad: number, palette: Palette | null) {
+  const { Box, Text } = ui
+  const Svg = palette && 'Svg' in ui ? ui.Svg : null
+  if (Svg && palette) {
+    // One Box a step, so each mark is an Svg next to its label, two cells between steps.
+    return (
+      <Box paddingLeft={pad} columnGap={2}>
+        {stepMarks(phase).map((group, i) => {
+          const mark = group.mark ? markSvg(group.mark, { palette }) : null
+          return (
+            <Box key={String(i)} alignItems="center" columnGap={1} flexShrink={0}>
+              {mark ? <Svg source={mark.source} alt={mark.alt} width={mark.width} height={mark.height} /> : null}
+              <Text dimColor>{group.label}</Text>
+            </Box>
+          )
+        })}
+      </Box>
+    )
+  }
+  return (
+    <Box paddingLeft={pad}>
+      <Text wrap="truncate-end">
+        {stepParts(phase).map((part, i) =>
+          part.mark ? (
+            <Text key={String(i)} color={STEP_COLOR[part.mark]}>
+              {part.text}
+            </Text>
+          ) : (
+            <Text key={String(i)} dimColor>
+              {part.text}
+            </Text>
+          ),
+        )}
+      </Text>
+    </Box>
+  )
+}
+
+function drawScaffold(
+  ui: Ui,
+  snapshot: ScaffoldState,
+  { columns, pad, top, elapsedMs, palette }: { columns: number; pad: number; top?: number; elapsedMs: number | null; palette: Palette | null },
+) {
+  const { Box } = ui
+  return (
+    <Box flexDirection="column" paddingTop={top}>
+      {drawScaffoldTitle(ui, snapshot, elapsedMs, columns, pad, palette)}
+      {drawSteps(ui, snapshot.phase, pad, palette)}
+    </Box>
+  )
+}
+
+function drawTerminal(ui: Ui, bodyColumns: number, snapshot: Exclude<Snapshot, { kind: 'idle' }>, elapsedMs: number | null) {
   const { Box, Text } = ui
 
   if (snapshot.kind === 'starting') {
@@ -433,7 +514,7 @@ function drawTerminal(ui: Ui, bodyColumns: number, snapshot: Exclude<Snapshot, {
   }
 
   if (snapshot.kind === 'scaffold') {
-    return drawScaffold(ui, snapshot, { columns: bodyColumns - PAD, pad: PAD, line: text => drawTerminalLine(ui, text) })
+    return drawScaffold(ui, snapshot, { columns: bodyColumns - PAD, pad: PAD, elapsedMs, palette: null })
   }
 
   const room = barWidth(bodyColumns)
@@ -496,18 +577,20 @@ function drawTerminal(ui: Ui, bodyColumns: number, snapshot: Exclude<Snapshot, {
 //
 // `target` says where it draws. On the desktop, with a palette for the person's theme, the
 // bar is the Svg of the design's thin segments; with none it is boxes in the theme's colors.
-// Anywhere else it is the terminal's band, three rows with a thin bar.
+// Anywhere else it is the terminal's band, three rows with a thin bar. `elapsedMs` is how
+// long a scaffold run has gone on, which only that run draws; null when it is not known.
 export function drawBand(
   ui: Ui,
   bodyColumns: number,
   snapshot: Snapshot,
-  target: { surface?: string; palette?: Palette | null } = {},
+  target: { surface?: string; palette?: Palette | null; elapsedMs?: number | null } = {},
 ) {
   const { Box, Text } = ui
+  const elapsedMs = target.elapsedMs ?? null
 
   if (snapshot.kind === 'idle') return null
 
-  if (target.surface !== 'desktop') return drawTerminal(ui, bodyColumns, snapshot)
+  if (target.surface !== 'desktop') return drawTerminal(ui, bodyColumns, snapshot, elapsedMs)
 
   if (snapshot.kind === 'starting') {
     return (
@@ -526,7 +609,7 @@ export function drawBand(
   }
 
   if (snapshot.kind === 'scaffold') {
-    return drawScaffold(ui, snapshot, { columns: bodyColumns, pad: 0, top: TOP_GAP, line: text => drawLine(ui, text) })
+    return drawScaffold(ui, snapshot, { columns: bodyColumns, pad: 0, top: TOP_GAP, elapsedMs, palette: target.palette ?? null })
   }
 
   const hasSvg = !!target.palette && 'Svg' in ui

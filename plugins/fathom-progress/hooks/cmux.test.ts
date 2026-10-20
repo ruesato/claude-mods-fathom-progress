@@ -44,14 +44,14 @@ test('the pills use the band\'s own colors, never an undefined one', async () =>
 
 test('a scaffold run is a pill per phase, with the issues made so far, and never a bar', async () => {
   const pill = (phase: 'resolving' | 'drafting' | 'waiting' | 'creating' | 'done', created: number) => cmuxEntries({ kind: 'scaffold', phase, created }).pill
-  expect(pill('resolving', 0)?.text).toBe('scaffold · checking tracker')
-  expect(pill('drafting', 0)?.text).toBe('scaffold · drafting')
-  expect(pill('waiting', 0)?.text).toBe('scaffold · waiting on you')
-  expect(pill('creating', 0)?.text).toBe('scaffold · creating')
-  expect(pill('creating', 1)?.text).toBe('scaffold · 1 issue made')
-  expect(pill('creating', 12)?.text).toBe('scaffold · 12 issues made')
-  expect(pill('done', 5)?.text).toBe('scaffold · done, 5 issues made')
-  expect(pill('done', 0)?.text).toBe('scaffold · done')
+  expect(pill('resolving', 0)?.text).toBe('Scaffold · Checking tracker')
+  expect(pill('drafting', 0)?.text).toBe('Scaffold · Drafting')
+  expect(pill('waiting', 0)?.text).toBe('Scaffold · Waiting on you')
+  expect(pill('creating', 0)?.text).toBe('Scaffold · Creating')
+  expect(pill('creating', 1)?.text).toBe('Scaffold · 1 issue made')
+  expect(pill('creating', 12)?.text).toBe('Scaffold · 12 issues made')
+  expect(pill('done', 5)?.text).toBe('Scaffold · Done, 5 issues made')
+  expect(pill('done', 0)?.text).toBe('Scaffold · Done')
   expect(cmuxEntries({ kind: 'scaffold', phase: 'creating', created: 3 }).meter).toBeNull()
 })
 
