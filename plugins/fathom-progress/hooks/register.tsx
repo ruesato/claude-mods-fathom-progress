@@ -3,15 +3,27 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { Plan, Snapshot } from '../types'
 import { readBd } from './bd'
+import { runSourceOf, toChecklistSnapshot } from './checklist'
 import { NONE, barLabelOn, cmuxEntries, isOurBar, meterValue, pillKeyFor } from './cmux'
 import type { CmuxEntries } from './cmux'
 import { paletteFor } from './desktop'
 import { drawBand } from './draw'
-import { POLL_MS, planPath, refsOfBranch, refsOfPrompt, snapshotOnStart, startOf, startOfPrompt, touchesRun } from './lifecycle'
+import {
+  POLL_MS,
+  checklistPath,
+  planPath,
+  refsOfBranch,
+  refsOfPrompt,
+  snapshotOnStart,
+  startOf,
+  startOfPrompt,
+  touchesRun,
+} from './lifecycle'
 import { parsePlan } from './plan'
 import { advance, callEvent, inputOf, resultEvent } from './scaffold'
 import type { ScaffoldEvent } from './scaffold'
 import { parseEpics, pickRun, toSnapshot } from './state'
+import type { Epic } from './state'
 
 const armedAt = atom({ plugin: 'fathom-progress', key: 'armedAt' } as const, null)
 const armedRefs = atom({ plugin: 'fathom-progress', key: 'refs' } as const, [])
@@ -41,6 +53,35 @@ async function readPlan($: EngineInterface, root: string, ref: string): Promise<
   }
 }
 
+// The Fathom epics bd lists, or why it could not be read. A bd that is missing or fails is
+// no reason to stop here: the issue may be on the checklist backend, which needs no bd.
+// With no epic and no checklist, the reason is what the band shows.
+async function epicsOf($: EngineInterface, root: string): Promise<{ epics: Epic[]; error: string | null }> {
+  try {
+    const epics = parseEpics(await bd($, root, ['list', '--type', 'epic', '--all', '--limit', '0', '--json']))
+    return epics === null ? { epics: [], error: 'bd did not return a JSON list' } : { epics, error: null }
+  } catch (error) {
+    return { epics: [], error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+// The checklist of the first of `refs` that has one, read from the working tree (its
+// in-progress marker is never committed), by ref; empty when none can be read.
+async function checklistsOf($: EngineInterface, root: string, refs: readonly string[]): Promise<Map<string, string>> {
+  const files = new Map<string, string>()
+  for (const ref of refs) {
+    const path = checklistPath(root, ref)
+    if (path === null) continue
+    try {
+      files.set(ref, await $.fs.read(path))
+      break
+    } catch {
+      // No file, or one that cannot be read: the issue is not on the checklist backend.
+    }
+  }
+  return files
+}
+
 // The branch the session's repository is on, or '' when there is none to read. Read with
 // each refresh and not when armed: Fathom makes the issue's branch after it starts.
 async function branchOf($: EngineInterface, root: string): Promise<string> {
@@ -58,25 +99,37 @@ let lastFollowed = ''
 // Reads bd and the plan document and builds what the band shows. Three bd calls, one
 // after the other: they are reads, but they share one embedded database. `typed` is
 // what the person typed after the command; with none, the branch's ref stands in.
+// When bd has no epic for that ref, the issue may be on the checklist backend: its
+// .fathom/tasks/<ref>.md is read instead, and bd being missing or failing hides neither.
 async function build($: EngineInterface, since: number, typed: readonly string[]): Promise<Snapshot> {
   try {
     const root = await $.session.root()
-    const epics = parseEpics(await bd($, root, ['list', '--type', 'epic', '--all', '--limit', '0', '--json']))
-    if (epics === null) return { kind: 'unavailable', reason: 'bd did not return a JSON list' }
+    const { epics, error } = await epicsOf($, root)
 
     const branch = typed.length > 0 ? [] : refsOfBranch(await branchOf($, root))
-    const epic = pickRun(epics, since, { refs: typed.length > 0 ? typed : branch, isExact: typed.length > 0 })
-    const followed = `${epic?.ref ?? 'nothing'} (typed ${typed.join(',') || '-'}, branch ${branch.join(',') || '-'})`
+    const refs = typed.length > 0 ? typed : branch
+    const epic = pickRun(epics, since, { refs, isExact: typed.length > 0 })
+    // Beads wins, so the checklist files are read only when bd has no epic to follow.
+    const files = epic === null ? await checklistsOf($, root, refs) : new Map<string, string>()
+    const source = runSourceOf({ epic, bdError: error, refs, files })
+
+    const run = source.kind === 'beads' ? source.epic.ref : source.kind === 'checklist' ? `${source.ref} (checklist)` : 'nothing'
+    const followed = `${run} (typed ${typed.join(',') || '-'}, branch ${branch.join(',') || '-'})`
     if (followed !== lastFollowed) {
       lastFollowed = followed
       $.ui.log(`fathom-progress: following ${followed}`, { to: 'debug' })
     }
-    if (epic === null) return { kind: 'starting' }
+    if (source.kind === 'starting') return { kind: 'starting' }
+    if (source.kind === 'unavailable') return source
+    if (source.kind === 'checklist') {
+      const plan = await readPlan($, root, source.ref)
+      return toChecklistSnapshot({ ref: source.ref, checklist: source.checklist, plan })
+    }
 
-    const ref = epic.ref
+    const ref = source.epic.ref
     const tasks = await bd($, root, ['list', '-l', ref, '--type', 'task', '--all', '--limit', '0', '--json'])
     const ready = await bd($, root, ['ready', '-l', ref, '--type', 'task', '--limit', '50', '--json'])
-    return toSnapshot({ epic, tasks, ready, plan: await readPlan($, root, ref) })
+    return toSnapshot({ epic: source.epic, tasks, ready, plan: await readPlan($, root, ref) })
   } catch (error) {
     // Unlike a count, a failure is kept and shown ("unavailable"), never zeros.
     const reason = error instanceof Error ? error.message : String(error)

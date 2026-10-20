@@ -1,8 +1,9 @@
 import { test, expect } from 'claude-code/testing'
 
 import type { Plan, Snapshot } from '../types'
-import { parseChecklist, toChecklistSnapshot } from './checklist'
+import { parseChecklist, runSourceOf, toChecklistSnapshot } from './checklist'
 import { parsePlan } from './plan'
+import type { Epic } from './state'
 
 // The example memory/checklist.md in the Fathom skill gives, line for line.
 const EXAMPLE = [
@@ -309,4 +310,57 @@ test('a task is titled without the issue ref in front, and carries its number an
   const task = tasksOf(snapshotOf(listOf('- [ ] 7. ONC-5: Wire auth API -> sub-issue: ONC-9')))[0]
 
   expect(task).toEqual({ id: '7', ref: 'ONC-9', title: 'Wire auth API', state: 'next', isInReview: false })
+})
+
+const EPIC: Epic = { id: 'e1', ref: 'ONC-5', status: 'open', createdAt: 0, updatedAt: 0 }
+const FILES = new Map([['ONC-5', listOf('- [ ] 1. One')]])
+
+test('beads wins when it has an epic, even if a checklist for the ref also exists', async () => {
+  const source = runSourceOf({ epic: EPIC, bdError: null, refs: ['ONC-5'], files: FILES })
+
+  expect(source).toEqual({ kind: 'beads', epic: EPIC })
+})
+
+test('with no epic the checklist for the ref is used', async () => {
+  const source = runSourceOf({ epic: null, bdError: null, refs: ['ONC-5'], files: FILES })
+
+  expect(source.kind).toBe('checklist')
+  expect(source.kind === 'checklist' && source.ref).toBe('ONC-5')
+  expect(source.kind === 'checklist' && source.checklist.tasks.length).toBe(1)
+})
+
+test('a bd that failed does not hide a readable checklist', async () => {
+  const source = runSourceOf({ epic: null, bdError: 'bd list exited 127: command not found', refs: ['ONC-5'], files: FILES })
+
+  expect(source.kind).toBe('checklist')
+})
+
+test('the first ref that has a checklist is the one followed', async () => {
+  const files = new Map([['ONC-6', listOf('- [ ] 1. Six')]])
+  const source = runSourceOf({ epic: null, bdError: null, refs: ['ONC-5', 'ONC-6'], files })
+
+  expect(source.kind === 'checklist' && source.ref).toBe('ONC-6')
+})
+
+test('no epic and no checklist is a run that has not begun, when bd could be read', async () => {
+  expect(runSourceOf({ epic: null, bdError: null, refs: ['ONC-5'], files: new Map() })).toEqual({ kind: 'starting' })
+})
+
+test('no epic and no checklist shows why bd could not be read, never a run that has not begun', async () => {
+  const source = runSourceOf({ epic: null, bdError: 'bd list did not print JSON', refs: ['ONC-5'], files: new Map() })
+
+  expect(source).toEqual({ kind: 'unavailable', reason: 'bd list did not print JSON' })
+})
+
+test('with no ref there is no checklist to look for', async () => {
+  expect(runSourceOf({ epic: null, bdError: null, refs: [], files: FILES })).toEqual({ kind: 'starting' })
+  expect(runSourceOf({ epic: null, bdError: 'no bd', refs: [], files: FILES })).toEqual({ kind: 'unavailable', reason: 'no bd' })
+})
+
+test('a file that is not a checklist is followed as one, and the band says so instead of going blank', async () => {
+  const source = runSourceOf({ epic: null, bdError: null, refs: ['ONC-5'], files: new Map([['ONC-5', 'hello']]) })
+
+  expect(source.kind === 'checklist' && toChecklistSnapshot({ ref: 'ONC-5', checklist: source.checklist, plan: null }).kind).toBe(
+    'unavailable',
+  )
 })

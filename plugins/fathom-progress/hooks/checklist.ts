@@ -1,5 +1,6 @@
 import type { Checklist, ChecklistTask, Plan, RunTask, Snapshot, TaskState } from '../types'
 import { reviewedRefs, shortTitle } from './state'
+import type { Epic } from './state'
 
 // The checklist file at .fathom/tasks/<ref>.md, read back as data: the memory backend
 // Fathom uses when the base branch does not track beads (memory/checklist.md in the
@@ -169,4 +170,32 @@ export function toChecklistSnapshot(input: { ref: string; checklist: Checklist; 
   const isFinished = run.every(t => t.state === 'done')
   if (isFinished) return { kind: 'finished', ref, ...title, tasks: run.map(t => ({ ...t, isInReview: false })) }
   return { kind: 'executing', ref, ...title, tasks: run }
+}
+
+// Where a run's tasks are read from, decided from what was found. Beads and the checklist
+// are two backends for the same thing and an issue has exactly one, so beads wins when it
+// has an epic, as the no-dual-truth rule has it; the checklist is for the issue beads knows
+// nothing about. `bdError` is why bd could not be read, or null when it was and found no
+// epic. `files` holds the text of each checklist that could be read, by ref; a ref with no
+// entry has none, whether the file is missing or not readable.
+export type RunSource =
+  | { kind: 'beads'; epic: Epic }
+  | { kind: 'checklist'; ref: string; checklist: Checklist }
+  | { kind: 'starting' }
+  | { kind: 'unavailable'; reason: string }
+
+export function runSourceOf(input: {
+  epic: Epic | null
+  bdError: string | null
+  refs: readonly string[]
+  files: ReadonlyMap<string, string>
+}): RunSource {
+  if (input.epic !== null) return { kind: 'beads', epic: input.epic }
+  for (const ref of input.refs) {
+    const text = input.files.get(ref)
+    if (text !== undefined) return { kind: 'checklist', ref, checklist: parseChecklist(text) }
+  }
+  // A bd that could not be read must not look like a run that has not begun, and a
+  // checklist, when there is one, has already been preferred to it.
+  return input.bdError === null ? { kind: 'starting' } : { kind: 'unavailable', reason: input.bdError }
 }

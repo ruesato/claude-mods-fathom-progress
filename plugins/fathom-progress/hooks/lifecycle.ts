@@ -66,12 +66,22 @@ export function refsOfBranch(branch: string): string[] {
   return refsIn(branch).slice(0, 1)
 }
 
-// The plan document of a run: .fathom/plans/<ref>.md under the session's root. A ref
-// that could leave that directory, or is not a plain token, has no document to read.
-export function planPath(root: string, ref: string): string | null {
+// A run's record under .fathom/<dir>/<ref>.md in the session's root. A ref that could
+// leave that directory, or is not a plain token, has no record to read.
+function recordPath(root: string, dir: 'plans' | 'tasks', ref: string): string | null {
   return /^[\w.-]+$/.test(ref) && ref !== '.' && ref !== '..'
-    ? `${root.replace(/\/+$/, '')}/.fathom/plans/${ref}.md`
+    ? `${root.replace(/\/+$/, '')}/.fathom/${dir}/${ref}.md`
     : null
+}
+
+// The plan document of a run: .fathom/plans/<ref>.md.
+export function planPath(root: string, ref: string): string | null {
+  return recordPath(root, 'plans', ref)
+}
+
+// The checklist of a run on the checklist memory backend: .fathom/tasks/<ref>.md.
+export function checklistPath(root: string, ref: string): string | null {
+  return recordPath(root, 'tasks', ref)
 }
 
 // A Bash command that may have changed what bd or the plan document holds: a bd call,
