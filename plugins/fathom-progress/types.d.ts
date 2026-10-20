@@ -50,6 +50,34 @@ export type RunTask = {
   isInReview: boolean
 }
 
+// One task line of a checklist file (.fathom/tasks/<ref>.md), the memory backend Fathom
+// uses when the base branch does not track beads. `number` is the task's permanent id,
+// the one `deps` name. `doneOn` and `hash` are on a closed task only, and `hash` may be
+// missing for a while: it is written after the commit and rides the next one.
+export type ChecklistTask = {
+  number: number
+  title: string
+  marker: 'open' | 'inProgress' | 'done'
+  deps: number[]
+  subIssue: string | null
+  doneOn: string | null
+  hash: string | null
+}
+
+// A checklist file read back as data. Every field is null or empty when the file does
+// not say it, so a file that is not a checklist reads as an empty one. `review` is the
+// Review line once it names an id; the placeholder Fathom writes before a review exists,
+// and the legacy `PR` line (a URL and no id), leave it null, and the latter is `pr`.
+export type Checklist = {
+  ref: string | null
+  title: string | null
+  issue: string | null
+  branch: string | null
+  review: PlanReview | null
+  pr: string | null
+  tasks: ChecklistTask[]
+}
+
 // Where a `/fathom:scaffold` run stands, worked out from the events a mod sees (the
 // tracker's MCP calls, the questions it asks, the turn ending), since scaffold records
 // nothing a mod can read. `resolving` is the lookups before the tracker is verified;
