@@ -3,6 +3,8 @@
 - Issue: https://linear.app/ruesato/issue/RUE-29/allow-fathom-progress-mod-to-read-from-checklists
 - Ref: RUE-29
 - Branch: feat/rue-29-read-checklists-in-the-band
+- Review: 2 https://github.com/ruesato/claude-mods-fathom-progress/pull/2
+- Finalization: complete
 
 ## Issue description
 
